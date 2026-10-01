@@ -1,4 +1,4 @@
-import type { Language, Prisma, ProductType } from '@prisma/client';
+import type { Language, Prisma, ProductType, StockStatus } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { EXPANSIONS, PRODUCT_TYPES } from '@/lib/categorize';
 import { ListingCard } from '@/components/listing-card';
@@ -9,6 +9,8 @@ import { DropsStrip } from '@/components/drops-strip';
 // Always read fresh stock from the database. The cron also calls
 // revalidatePath('/') when something changes.
 export const dynamic = 'force-dynamic';
+
+const BUYABLE: StockStatus[] = ['IN_STOCK', 'QUEUE', 'PREORDER'];
 
 type SearchParams = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -37,7 +39,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const where: Prisma.TrackedUrlWhereInput = {
     active: true,
     ...(Object.keys(product).length > 0 && { product }),
-    ...(filters.view === 'in-stock' && { status: { in: ['IN_STOCK', 'QUEUE', 'PREORDER'] } }),
+    ...(filters.view === 'in-stock' && { status: { in: BUYABLE } }),
     ...(filters.view === 'sale' && { onSale: true }),
   };
 
@@ -57,7 +59,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       orderBy: { releaseDate: { sort: 'asc', nulls: 'last' } },
       take: 10,
     }),
-    prisma.trackedUrl.count({ where: { active: true, status: { in: ['IN_STOCK', 'QUEUE', 'PREORDER'] } } }),
+    prisma.trackedUrl.count({ where: { active: true, status: { in: BUYABLE } } }),
     prisma.trackedUrl.count({ where: { active: true, onSale: true } }),
     prisma.trackedUrl.count({ where: { active: true } }),
   ]);

@@ -40,7 +40,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function FilterBar({ filters, counts }: { filters: Filters; counts: Record<string, number> }) {
   const sets = [...EXPANSIONS].sort((a, b) => Number(!!b.hot) - Number(!!a.hot));
-  const toggle = (key: keyof Filters, value: string) => href(filters, { [key]: filters[key] === value ? undefined : value });
+  const toggle = (key: 'set' | 'type' | 'lang', value: string) => {
+    const patch: Partial<Filters> = {};
+    patch[key] = filters[key] === value ? undefined : value;
+    return href(filters, patch);
+  };
 
   return (
     <div className="flex flex-col gap-3">

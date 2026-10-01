@@ -1,4 +1,4 @@
-// Peek — Prisma schema (PostgreSQL: Supabase or Neon/Vercel Postgres)
+// Peek — Prisma schema (PostgreSQL via Vercel's Neon integration)
 
 generator client {
   provider = "prisma-client-js"
@@ -6,8 +6,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled connection (Supabase: port 6543, ?pgbouncer=true)
-  directUrl = env("DIRECT_URL")   // direct connection, used by `prisma migrate` / `db push`
+  url       = env("DATABASE_URL")          // pooled connection — set automatically by Vercel's Neon integration
+  directUrl = env("DATABASE_URL_UNPOOLED") // direct connection, used by `prisma db push` during the build
 }
 
 enum Retailer {

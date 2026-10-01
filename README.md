@@ -1,6 +1,6 @@
 # Peek — UK Pokémon TCG stock finder
 
-Next.js (App Router) + Tailwind + Prisma/Postgres + cheerio, built to run on Vercel's free (Hobby) plan.
+Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run on Vercel's free (Hobby) plan.
 
 ## Directory structure
 
@@ -55,16 +55,16 @@ Statuses: `IN_STOCK`, `QUEUE` (waiting room live — a drop is happening), `PREO
 
 ## Setup
 
-```bash
-npm install
-cp .env.example .env          # fill in Supabase URLs + CRON_SECRET
-npx prisma db push            # create tables
-npm run dev
-```
+Runs on Vercel + Neon (added from Vercel → Storage), with no other services.
 
-Deploy: push to GitHub → import in Vercel → add `DATABASE_URL`, `DIRECT_URL`, `CRON_SECRET`, `SCRAPER_USER_AGENT` → deploy. Then add `PEEK_URL` and `CRON_SECRET` as GitHub Actions secrets.
+1. Vercel → Storage → add a Neon database to the project. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`.
+2. Vercel → Settings → Environment Variables → add `CRON_SECRET` (optional: `SCRAPER_USER_AGENT`).
+3. Deploy. The build runs `prisma db push`, which creates/updates the tables automatically.
+4. GitHub → Settings → Secrets and variables → Actions → add `PEEK_URL` (your Vercel URL) and `CRON_SECRET`.
 
-Drops/allocation links are curated by hand: add rows to the `Drop` table in Supabase's table editor (or build a small admin page later).
+Local development: `npm install`, copy the database variables into `.env` (see `.env.example`), `npm run dev`.
+
+Drops/allocation links are curated by hand: add rows to the `Drop` table from Vercel → Storage → your Neon database → open in Neon console (or build a small admin page later).
 
 ## Scheduling on the free tier
 
@@ -73,7 +73,6 @@ Vercel Hobby only allows each cron to run **once per day**, and fires it at some
 - `vercel.json` keeps two daily crons: discovery (04:30 UTC) and a scrape safety-net run (07:00 UTC).
 - The frequent scrape trigger is external: `.github/workflows/scrape.yml` (every 30 min) or a free service like cron-job.org (can go down to every few minutes). Both just send the same authorised GET.
 - Polling frequency per URL is adaptive (`nextDelayMs` in `run.ts`), so a busy schedule doesn't mean every page is fetched every time.
-- Bonus: frequent requests keep the Supabase free project from pausing for inactivity.
 
 ## Before going live — things to fill in
 
