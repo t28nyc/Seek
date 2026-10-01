@@ -10,6 +10,7 @@ import { FeedSources } from '@/components/feed-sources';
 import { getSettings, matchesAny } from '@/lib/settings';
 import { ADDED_BY_YOU } from '@/lib/drops/feeds';
 import { toTile } from '@/lib/drops/tiles';
+import { isNonUkPost } from '@/lib/uk';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'In store — Peek' };
@@ -50,8 +51,10 @@ export default async function InStorePage({ searchParams }: { searchParams: Prom
 
   // Releases only: hide events, game nights, leagues… (word list in Settings). Links you added always show.
   const isFiltered = (title: string, source: string) => source !== ADDED_BY_YOU && matchesAny(title, settings.inStoreExclude);
-  const filteredCount = items.filter((i) => isFiltered(i.title, i.source)).length;
-  const shown = showFiltered ? items : items.filter((i) => !isFiltered(i.title, i.source));
+  // UK only (posts saved before the UK filter existed are checked here too)
+  const ukItems = items.filter((i) => i.source === ADDED_BY_YOU || !isNonUkPost(`${i.title} ${i.summary ?? ''}`, settings.nonUkWords));
+  const filteredCount = ukItems.filter((i) => isFiltered(i.title, i.source)).length;
+  const shown = showFiltered ? ukItems : ukItems.filter((i) => !isFiltered(i.title, i.source));
 
   const tiles: DropTileData[] = [
     ...manual.map((d) => ({
@@ -82,7 +85,7 @@ export default async function InStorePage({ searchParams }: { searchParams: Prom
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg font-bold">In store</h1>
-          <p className="text-sm text-zinc-500">Pokémon releases in high-street shops and supermarkets, and set release days.</p>
+          <p className="text-sm text-zinc-500">Pokémon releases in UK high-street shops and supermarkets, and set release days.</p>
         </div>
         <div className="flex items-center gap-2">
           {tiles.length > 0 && (

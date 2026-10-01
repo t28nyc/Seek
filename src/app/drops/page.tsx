@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { ADDED_BY_YOU } from '@/lib/drops/feeds';
 import { toTile } from '@/lib/drops/tiles';
 import { getSettings } from '@/lib/settings';
+import { isNonUkPost } from '@/lib/uk';
 import { DatedGroups, dayHeading, groupBy, monthHeading } from '@/components/dated-groups';
 import { AddDropForm } from '@/components/add-drop-form';
 import { DeleteButton } from '@/components/delete-button';
@@ -36,13 +37,15 @@ export default async function DropsPage() {
     prisma.dropItem.count({ where: { kind: 'online', hidden: true } }),
   ]);
 
+  // UK only (posts saved before the UK filter existed are checked here too)
+  const uk = (i: (typeof latest)[number]) => i.source === ADDED_BY_YOU || !isNonUkPost(`${i.title} ${i.summary ?? ''}`, settings.nonUkWords);
   const groups = [
     ...groupBy(
-      upcoming.map((i) => toTile(i, 'online')),
+      upcoming.filter(uk).map((i) => toTile(i, 'online')),
       (t) => `Coming up · ${monthHeading(t.releaseDate)}`,
     ),
     ...groupBy(
-      latest.map((i) => toTile(i, 'online')),
+      latest.filter(uk).map((i) => toTile(i, 'online')),
       (t) => (t.publishedAt ? dayHeading(t.publishedAt) : 'Your links'),
     ),
   ];
@@ -53,7 +56,7 @@ export default async function DropsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg font-bold">Product drops</h1>
-          <p className="text-sm text-zinc-500">Product drops, raffles, pre-orders, restocks and new sets — soonest first.</p>
+          <p className="text-sm text-zinc-500">UK product drops, raffles, pre-orders, restocks and new sets — soonest first.</p>
         </div>
         <div className="flex items-center gap-2">
           {count > 0 && (

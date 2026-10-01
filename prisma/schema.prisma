@@ -150,6 +150,8 @@ model Shop {
   platform      String    @default("shopify") // "shopify" (catalogue JSON), "sitemap" (product URLs from sitemap.xml) or "listing" (product links on a category page)
   collection    String?   // Shopify: scan only /collections/<this>. Listing: the category page URL. Null = whole shop.
   enabled       Boolean   @default(true)
+  status        String    @default("active") // "checking" (new, not verified yet) | "active" | "not-uk" | "unreadable"
+  origin        String    @default("you")    // "you" | "starter list" | "found on web"
   scanPage      Int       @default(1) // resume point: big catalogues span several runs
   nextScanAt    DateTime  @default(now())
   lastScannedAt DateTime?

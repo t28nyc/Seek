@@ -5,6 +5,7 @@ import { claimJob } from '@/lib/jobs';
 import { runDueChecks } from '@/lib/scraper/run';
 import { runDueScans } from '@/lib/scraper/catalog';
 import { recheckAddedDrops, refreshDrops } from '@/lib/drops/feeds';
+import { verifyPendingShops } from '@/lib/scraper/shops';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -26,11 +27,11 @@ export async function POST() {
       where: { active: true, source: { in: ['USER', 'SEED'] } },
       data: { nextCheckAt: new Date() },
     }),
-    prisma.shop.updateMany({ where: { enabled: true }, data: { nextScanAt: new Date() } }),
+    prisma.shop.updateMany({ where: { enabled: true, status: 'active' }, data: { nextScanAt: new Date() } }),
   ]);
 
   after(async () => {
-    await Promise.allSettled([runDueChecks({ budgetMs: 45_000, limit: 80 }), runDueScans(45_000), refreshDrops(), recheckAddedDrops(10, 60_000)]);
+    await Promise.allSettled([runDueChecks({ budgetMs: 45_000, limit: 80 }), runDueScans(45_000), refreshDrops(), recheckAddedDrops(10, 60_000), verifyPendingShops(3, 40_000)]);
     revalidatePath('/', 'layout');
   });
 

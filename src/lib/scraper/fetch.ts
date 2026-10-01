@@ -6,6 +6,7 @@
  */
 
 import { isPublicHost } from '../retailers';
+import { robotsAllows } from '../robots';
 
 export type FetchFailureKind = 'timeout' | 'network' | 'http' | 'blocked' | 'queue' | 'too_large' | 'unsafe';
 
@@ -95,6 +96,9 @@ async function fetchOnce(url: string, timeoutMs: number): Promise<FetchResult> {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (!isPublicHost(new URL(current).hostname)) {
         throw new FetchFailure('unsafe', 'Refusing to fetch a non-public address');
+      }
+      if (!(await robotsAllows(current, HEADERS['User-Agent']))) {
+        throw new FetchFailure('blocked', 'The site’s robots.txt asks bots not to read this page');
       }
       res = await fetch(current, { headers: HEADERS, redirect: 'manual', signal: ctrl.signal, cache: 'no-store' });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;

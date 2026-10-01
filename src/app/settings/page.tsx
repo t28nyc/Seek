@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getFeeds, getRrpRules, getSettings, SETTING_LABELS, type GeneralSettings } from '@/lib/settings';
 import { GeneralSettingsForm, RrpTableEditor, SourcesEditor } from '@/components/settings-editors';
+import { ShopsEditor } from '@/components/shops-editor';
+import { ensureStarterShops } from '@/lib/scraper/shops';
 import { timeAgo } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +14,7 @@ const TABS = [
   { id: 'rrp', label: 'RRP table' },
   { id: 'sources', label: 'Sources' },
   { id: 'checking', label: 'Checking & keywords' },
-  { id: 'websites', label: 'Websites' },
+  { id: 'websites', label: 'Shops' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -107,47 +109,46 @@ async function CheckingTab() {
 }
 
 async function WebsitesTab() {
-  const shops = await prisma.shop.findMany({ orderBy: { name: 'asc' } });
+  await ensureStarterShops();
+  const shops = await prisma.shop.findMany({ where: { status: { not: 'removed' } }, orderBy: [{ status: 'asc' }, { name: 'asc' }] });
+  const counts = await Promise.all(
+    shops.map((s) =>
+      Promise.all([
+        prisma.trackedUrl.count({ where: { active: true, url: { startsWith: `https://${s.host}/` } } }),
+        prisma.trackedUrl.count({ where: { active: true, status: 'IN_STOCK', url: { startsWith: `https://${s.host}/` } } }),
+      ]),
+    ),
+  );
+  const how: Record<string, string> = {
+    shopify: 'Shopify catalogue',
+    listing: 'category pages',
+    sitemap: 'sitemap',
+    auto: 'not checked yet',
+  };
+  const order: Record<string, number> = { active: 0, checking: 1, unreadable: 2, 'not-uk': 3 };
+  const rows = shops
+    .map((s, i) => ({
+      id: s.id,
+      name: s.name,
+      host: s.host,
+      status: s.status,
+      enabled: s.enabled,
+      origin: s.origin,
+      how: how[s.platform] ?? s.platform,
+      products: counts[i][0],
+      inStock: counts[i][1],
+      lastScan: s.lastScannedAt ? timeAgo(s.lastScannedAt) : 'not yet',
+      error: s.status === 'active' ? null : s.lastError,
+    }))
+    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.inStock - a.inStock || b.products - a.products);
   return (
     <>
       <Intro>
-        Websites Peek scans for Pokémon products. Add one by pasting its homepage or category page on the{' '}
-        <Link href="/" className="underline">
-          Online page
-        </Link>
-        ; remove one from the “Websites Peek scans” panel there.
+        UK shops Peek polls for Pokémon products. New shops are checked first: they must price in pounds and Peek must be able
+        to read their products (respecting each site’s robots.txt). The list starts with shops from UK buying guides; “Find
+        more UK shops” searches the web for others, and it runs automatically once a week.
       </Intro>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="text-[11px] uppercase tracking-wide text-zinc-500">
-            <tr className="border-b border-zinc-200 dark:border-zinc-800">
-              <th className="py-2 pr-3 font-semibold">Website</th>
-              <th className="py-2 pr-3 font-semibold">Scans</th>
-              <th className="py-2 pr-3 text-right font-semibold">Products</th>
-              <th className="py-2 font-semibold">Last scan</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {shops.map((s) => (
-              <tr key={s.id} className={s.enabled ? '' : 'opacity-50'}>
-                <td className="py-2 pr-3">{s.name}</td>
-                <td className="py-2 pr-3 text-zinc-500">
-                  {!s.enabled ? 'removed' : s.platform === 'listing' ? 'category page' : s.collection ? `“${s.collection}”` : 'whole site'}
-                </td>
-                <td className="py-2 pr-3 text-right tabular-nums">{s.productsFound}</td>
-                <td className="py-2 text-zinc-500">{s.lastError ?? (s.lastScannedAt ? timeAgo(s.lastScannedAt) : 'not yet')}</td>
-              </tr>
-            ))}
-            {!shops.length && (
-              <tr>
-                <td colSpan={4} className="py-3 text-zinc-500">
-                  None yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ShopsEditor shops={rows} />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { resolveStore } from '@/lib/retailers';
 import { scrapeUrl } from '@/lib/scraper/scrape';
 import { applyResult } from '@/lib/scraper/run';
 import { addListingPage, addShop, scanShop } from '@/lib/scraper/catalog';
+import { ukCheck } from '@/lib/uk';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -36,6 +37,9 @@ export async function POST(req: Request) {
       });
     }
     const added = await addShop(resolved.shopHost, resolved.collection);
+    if (added && 'notUk' in added) {
+      return NextResponse.json({ error: `Peek is UK-only — that site prices in ${added.currency === 'OTHER' ? 'another currency' : added.currency}.` }, { status: 400 });
+    }
     if (!added) {
       return NextResponse.json(
         {
@@ -74,6 +78,17 @@ export async function POST(req: Request) {
     }
     revalidatePath('/');
     return NextResponse.json({ kind: 'product', created: false, listing: existing });
+  }
+
+  // UK only: shops we don't know must price in pounds; Pokémon Center links must be its UK store.
+  if (resolved.config.key === 'POKEMON_CENTER' && !/^\/en-gb\//.test(new URL(resolved.url).pathname)) {
+    return NextResponse.json({ error: 'Peek is UK-only — use the UK Pokémon Center (pokemoncenter.com/en-gb/…).' }, { status: 400 });
+  }
+  if (!resolved.config.key) {
+    const uk = await ukCheck(new URL(resolved.url).hostname);
+    if (uk.verdict === 'not-uk') {
+      return NextResponse.json({ error: 'Peek is UK-only — that shop doesn’t price in pounds.' }, { status: 400 });
+    }
   }
 
   const item = await prisma.trackedUrl.create({

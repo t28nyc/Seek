@@ -18,6 +18,7 @@ import { linkProducts } from '../products';
 import { fetchHtml } from './fetch';
 import { parsePricePence } from './parse';
 import { findRrpPence } from './parse';
+import { ukCheck } from '../uk';
 import { DEFAULT_SETTINGS, getSettings, isPriorityTitle, matchesAny, splitList, type GeneralSettings } from '../settings';
 
 const MIN = 60_000;
@@ -48,7 +49,7 @@ const SINGLE_CARD = /\b\d{1,3}\s?\/\s?\d{1,3}\b|\b(single|graded|psa|cgc|bgs)\b/
 // Settings used by the scanner (Settings page). Loaded at the start of each scan.
 let scanSettings: GeneralSettings = DEFAULT_SETTINGS;
 let excludePhrases = splitList(DEFAULT_SETTINGS.excludeFromScans);
-async function loadScanSettings() {
+export async function loadScanSettings() {
   scanSettings = await getSettings();
   excludePhrases = splitList(scanSettings.excludeFromScans);
 }
@@ -392,7 +393,13 @@ export async function crawlListingPage(startUrl: string, deadline: number, maxPa
 }
 
 async function scanListingShop(shop: ShopRow, deadline: number) {
-  const urls = shop.collection ? await crawlListingPage(shop.collection, deadline) : [];
+  // One or more category pages, one per line
+  const pages = (shop.collection ?? '').split('\n').filter((u) => /^https?:\/\//.test(u));
+  const urls: string[] = [];
+  for (const page of pages) {
+    if (Date.now() > deadline) break;
+    urls.push(...(await crawlListingPage(page, deadline)));
+  }
   const added = await saveFoundUrls(urls);
   await prisma.shop.update({
     where: { id: shop.id },
@@ -444,9 +451,9 @@ export async function runDueScans(budgetMs = 45_000) {
   await loadScanSettings();
   await prisma.shop.createMany({ data: SEED_SHOPS, skipDuplicates: true });
   const due = await prisma.shop.findMany({
-    where: { enabled: true, nextScanAt: { lte: new Date() } },
+    where: { enabled: true, status: 'active', nextScanAt: { lte: new Date() } },
     orderBy: { nextScanAt: 'asc' },
-    take: 6,
+    take: 8,
   });
   return Promise.all(due.map((shop) => scanShop(shop, deadline)));
 }
@@ -458,6 +465,8 @@ export async function runDueScans(budgetMs = 45_000) {
  */
 export async function addShop(host: string, collection?: string) {
   await loadScanSettings();
+  const uk = await ukCheck(host);
+  if (uk.verdict === 'not-uk') return { notUk: true as const, currency: uk.currency };
   const existing = await prisma.shop.findUnique({ where: { host } });
   if (existing?.enabled && !existing.collection && existing.platform === 'shopify' && collection) {
     return { shop: existing, platform: 'shopify' as const, alreadyWhole: true };
@@ -467,8 +476,8 @@ export async function addShop(host: string, collection?: string) {
   if (firstPage) {
     const shop = await prisma.shop.upsert({
       where: { host },
-      update: { enabled: true, platform: 'shopify', collection: collection ?? null, nextScanAt: new Date(), scanPage: 1, lastError: null },
-      create: { host, name: storeNameFromHost(host), platform: 'shopify', collection: collection ?? null },
+      update: { enabled: true, status: 'active', platform: 'shopify', collection: collection ?? null, nextScanAt: new Date(), scanPage: 1, lastError: null },
+      create: { host, name: storeNameFromHost(host), platform: 'shopify', status: 'active', origin: 'you', collection: collection ?? null },
     });
     return { shop, platform: 'shopify' as const, alreadyWhole: false };
   }
@@ -478,8 +487,8 @@ export async function addShop(host: string, collection?: string) {
   if (!urls.length) return null;
   const shop = await prisma.shop.upsert({
     where: { host },
-    update: { enabled: true, platform: 'sitemap', collection: null, lastError: null },
-    create: { host, name: storeNameFromHost(host), platform: 'sitemap' },
+    update: { enabled: true, status: 'active', platform: 'sitemap', collection: null, lastError: null },
+    create: { host, name: storeNameFromHost(host), platform: 'sitemap', status: 'active', origin: 'you' },
   });
   await saveFoundUrls(urls);
   await prisma.shop.update({
@@ -501,8 +510,8 @@ export async function addListingPage(url: string, deadline: number) {
       ? existing // already scanning the whole site; just add these links
       : await prisma.shop.upsert({
           where: { host },
-          update: { enabled: true, platform: 'listing', collection: url, lastError: null },
-          create: { host, name: storeNameFromHost(host), platform: 'listing', collection: url },
+          update: { enabled: true, status: 'active', platform: 'listing', collection: url, lastError: null },
+          create: { host, name: storeNameFromHost(host), platform: 'listing', status: 'active', origin: 'you', collection: url },
         });
   await saveFoundUrls(urls);
   await prisma.shop.update({

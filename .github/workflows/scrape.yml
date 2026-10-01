@@ -29,7 +29,7 @@ jobs:
       BASE: ${{ secrets.PEEK_URL }}
     steps:
       # Each job decides for itself whether anything is due, so calling all
-      # three every 5 minutes is cheap. One failing doesn't stop the others.
+      # four every 5 minutes is cheap. One failing doesn't stop the others.
       - name: Check tracked products
         continue-on-error: true
         run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/scrape"
@@ -39,3 +39,6 @@ jobs:
       - name: Read drop and deal feeds
         continue-on-error: true
         run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/drops"
+      - name: Check new shops and find more (weekly)
+        continue-on-error: true
+        run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/shops"

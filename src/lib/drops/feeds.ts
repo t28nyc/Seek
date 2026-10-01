@@ -12,6 +12,7 @@ import { prisma } from '../db';
 import { fetchHtml } from '../scraper/fetch';
 import { extractReleaseDate } from '../dates';
 import { extractDropDetails, type DropDetails } from './extract';
+import { isNonUkPost } from '../uk';
 import { isPublicHost } from '../retailers';
 import { getFeeds, getSettings } from '../settings';
 
@@ -132,7 +133,10 @@ export async function refreshDrops(): Promise<FeedResult[]> {
     feeds.map(async (feed): Promise<FeedResult> => {
       try {
         const { html } = await fetchHtml(feed.url, { timeoutMs: 10_000, retries: 1 });
-        const posts = parseFeed(html).filter((p) => isDropPost(p.title, p.summary, feed.kind));
+        // Pokémon TCG drops only, and UK only: posts about US/other shops or $/€ prices are left out.
+        const posts = parseFeed(html).filter(
+          (p) => isDropPost(p.title, p.summary, feed.kind) && !isNonUkPost(`${p.title} ${p.summary}`, settings.nonUkWords),
+        );
         const { count } = posts.length
           ? await prisma.dropItem.createMany({
               data: posts.map((p) => ({

@@ -36,6 +36,18 @@ Worked out automatically, best source first: set by you → "RRP £x" (or MSRP /
 
 Stored in the `Setting`, `RrpRule` and `FeedSource` tables; defaults in `lib/settings.ts`.
 
+## UK only
+
+- **Shops** must price in pounds: `.uk` domains and known UK retailers pass; otherwise the homepage currency is read (Shopify's active currency, structured data, or £ vs $/€ prices). Non-UK shops are refused or marked "Not UK".
+- **Pasted product links** from unknown shops get the same check; Pokémon Center links must be the `/en-gb/` store.
+- **Drop and in-store posts** mentioning US/other-country shops (Target, Walmart, GameStop, EB Games…) or $/€ prices are left out unless they also mention the UK or £ (word list in Settings). Web searches use Bing's UK edition.
+
+## Shops Peek polls (Settings → Shops)
+
+A starter list of ~40 UK shops from UK buying guides, plus shops found on the web (links in UK "where to buy" articles, searched weekly or with **Find more UK shops**), plus shops you add. Each new shop is checked before polling: UK pricing, then the best way to read it — Shopify catalogue, its Pokémon category pages, or its sitemap. The table shows status (Polling / Paused / Checking / Not UK / Can't read), products found, how many are in stock, and lets you pause, re-check or remove each one (`lib/scraper/shops.ts`, `/api/shops`, `/api/cron/shops`).
+
+Peek respects each site's **robots.txt** (`lib/robots.ts`) and never fetches pages a site asks bots not to read. Marketplaces (Amazon, eBay) aren't polled.
+
 ## Adding a whole website
 
 Paste any of these into the box on the Online page:
@@ -55,6 +67,7 @@ The GitHub workflow calls three endpoints every 5 minutes; each decides for itse
 | `/api/cron/scrape` | Checks tracked product pages that are due |
 | `/api/cron/scan` | Scans shop catalogues that are due |
 | `/api/cron/drops` | Reads drop/deal feeds (every 30 min) |
+| `/api/cron/shops` | Checks newly added shops; finds more UK shops weekly |
 
 ## Directory structure
 

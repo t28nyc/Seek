@@ -51,7 +51,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
     }),
     prisma.trackedUrl.count({ where }),
     prisma.trackedUrl.groupBy({ by: ['status'], where: baseWhere(f), _count: { _all: true } }),
-    prisma.shop.findMany({ where: { enabled: true }, orderBy: { name: 'asc' } }),
+    prisma.shop.findMany({ where: { enabled: true, status: 'active' }, orderBy: { name: 'asc' } }),
     prisma.trackedUrl.findMany({ where: { active: true, source: 'USER' }, select: { url: true }, take: 500 }),
   ]);
   const rrps = await rrpForListings(listings);
@@ -86,7 +86,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
         <details className="group rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">
             <span>
-              Websites Peek scans <span className="font-normal text-zinc-500">({shops.length})</span>
+              UK shops Peek polls <span className="font-normal text-zinc-500">({shops.length})</span>
               {shops.some((s) => s.nextScanAt.getTime() <= now || s.scanPage > 1) && (
                 <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-sky-600">
                   <span className="size-1.5 animate-pulse rounded-full bg-current" /> scanning
@@ -95,6 +95,11 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
             </span>
             <span className="text-zinc-400 transition group-open:rotate-180">▾</span>
           </summary>
+          <p className="border-t border-zinc-100 px-4 py-2 text-xs text-zinc-500 dark:border-zinc-800">
+            <Link href="/settings?tab=websites" className="font-semibold underline">
+              Manage shops, add more or find new ones in Settings
+            </Link>
+          </p>
           <ul className="divide-y divide-zinc-100 border-t border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
             {shops.map((s) => {
               const scanning = s.nextScanAt.getTime() <= now || s.scanPage > 1;

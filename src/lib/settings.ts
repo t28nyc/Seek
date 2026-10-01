@@ -21,6 +21,7 @@ export type GeneralSettings = {
   inStoreExclude: string;
   dropsKeepDays: number;
   rrpForJapanese: boolean;
+  nonUkWords: string;
 };
 
 const OLD_PRIORITY_DEFAULT = 'perfect order, nihil zero, paradox rift, prismatic evolutions, destined rivals';
@@ -48,6 +49,8 @@ export const DEFAULT_SETTINGS: GeneralSettings = {
     'event, game night, league, tournament, prerelease, pre release, championship, play day, cup, challenge, ticket, booking, meetup',
   dropsKeepDays: 30,
   rrpForJapanese: false,
+  nonUkWords:
+    'target, walmart, gamestop, best buy, costco wholesale, sams club, meijer, kroger, barnes noble, walgreens, cvs, dollar general, five below, usa, united states, canada, australia, eb games, jb hi fi',
 };
 
 export const SETTING_LABELS: Record<keyof GeneralSettings, { label: string; help: string; unit?: string }> = {
@@ -64,6 +67,10 @@ export const SETTING_LABELS: Record<keyof GeneralSettings, { label: string; help
   inStoreExclude: { label: 'Hide from In store', help: 'In store shows releases only; items mentioning any of these are hidden. Comma-separated.' },
   dropsKeepDays: { label: 'Keep drops and news for', help: 'Older posts drop off the pages.', unit: 'days' },
   rrpForJapanese: { label: 'Use the RRP table for Japanese products', help: 'Off by default — Japanese products have different prices.' },
+  nonUkWords: {
+    label: 'Not-UK words',
+    help: 'Drop and in-store posts mentioning these (or $/€ prices) are left out unless they also mention the UK or £. Comma-separated.',
+  },
 };
 
 let cache: { at: number; value: GeneralSettings } | null = null;
@@ -191,10 +198,10 @@ export const bing = (q: string) => `https://www.bing.com/news/search?q=${encodeU
 export const DEFAULT_FEEDS: { name: string; url: string; kind: 'deal' | 'news'; page: 'online' | 'in-store' | 'auto' }[] = [
   { name: 'HotUKDeals', url: 'https://www.hotukdeals.com/rss/tag/pokemon', kind: 'deal', page: 'auto' },
   { name: 'PokeBeach', url: 'https://www.pokebeach.com/feed', kind: 'news', page: 'auto' },
-  { name: 'Web: pre-orders', url: bing('pokemon tcg pre-order'), kind: 'news', page: 'online' },
+  { name: 'Web: pre-orders', url: bing('pokemon tcg pre-order uk'), kind: 'news', page: 'online' },
   { name: 'Web: restocks', url: bing('pokemon cards restock uk'), kind: 'news', page: 'online' },
-  { name: 'Web: new sets', url: bing('pokemon tcg new set release date'), kind: 'news', page: 'auto' },
-  { name: 'Web: Pokémon Center', url: bing('pokemon center tcg pre-orders'), kind: 'news', page: 'online' },
+  { name: 'Web: new sets', url: bing('pokemon tcg new set release date uk'), kind: 'news', page: 'auto' },
+  { name: 'Web: Pokémon Center', url: bing('pokemon center uk pre-orders'), kind: 'news', page: 'online' },
   { name: 'Web: in stores', url: bing('pokemon cards in stores uk'), kind: 'news', page: 'in-store' },
   { name: 'Web: UK shops', url: bing('pokemon cards smyths OR argos OR tesco OR asda OR game'), kind: 'news', page: 'in-store' },
   { name: 'Web: release day', url: bing('pokemon tcg release day shops uk'), kind: 'news', page: 'in-store' },
@@ -204,6 +211,16 @@ export async function getFeeds(includeDisabled = false) {
   await seedOnce('seeded.feeds', () =>
     prisma.feedSource.createMany({ data: DEFAULT_FEEDS.map((f, i) => ({ ...f, sortOrder: i })), skipDuplicates: true }),
   );
+  // One-off: make the original web searches UK-specific.
+  await seedOnce('migrated.feeds.uk', async () => {
+    for (const [from, to] of [
+      ['pokemon tcg pre-order', 'pokemon tcg pre-order uk'],
+      ['pokemon tcg new set release date', 'pokemon tcg new set release date uk'],
+      ['pokemon center tcg pre-orders', 'pokemon center uk pre-orders'],
+    ]) {
+      await prisma.feedSource.updateMany({ where: { url: bing(from) }, data: { url: bing(to) } }).catch(() => null);
+    }
+  });
   return prisma.feedSource.findMany({
     where: includeDisabled ? {} : { enabled: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
