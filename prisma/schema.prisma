@@ -1,0 +1,138 @@
+// Peek — Prisma schema (PostgreSQL: Supabase or Neon/Vercel Postgres)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled connection (Supabase: port 6543, ?pgbouncer=true)
+  directUrl = env("DIRECT_URL")   // direct connection, used by `prisma migrate` / `db push`
+}
+
+enum Retailer {
+  POKEMON_CENTER
+  SMYTHS
+  GAME
+  MAGIC_MADHOUSE
+  CHAOS_CARDS
+}
+
+// Declaration order matters: Postgres sorts enums by it, so ORDER BY status
+// puts in-stock items first on the dashboard.
+enum StockStatus {
+  IN_STOCK
+  QUEUE        // retailer waiting room is up — usually means a drop is live
+  PREORDER
+  COMING_SOON
+  OUT_OF_STOCK
+  UNKNOWN
+}
+
+enum ProductType {
+  ETB
+  BOOSTER_BOX
+  BOOSTER_BUNDLE
+  BOOSTER_PACK
+  BLISTER
+  PREMIUM_COLLECTION
+  COLLECTION_BOX
+  TIN
+  OTHER
+}
+
+enum Language {
+  EN
+  JP
+  OTHER
+}
+
+enum ListingSource {
+  SEED // found by the daily discovery crawl
+  USER // pasted in by a user
+}
+
+/// A canonical product ("Perfect Order Elite Trainer Box"), shared by every
+/// retailer that sells it. Grouping key is `slug`, built by lib/products.ts.
+model Product {
+  id        String       @id @default(cuid())
+  slug      String       @unique
+  name      String
+  expansion String?      // key from lib/categorize.ts, e.g. "perfect-order"
+  type      ProductType  @default(OTHER)
+  language  Language     @default(EN)
+  hot       Boolean      @default(false) // sought-after set: polled more often
+  listings  TrackedUrl[]
+  createdAt DateTime     @default(now())
+
+  @@index([expansion, type])
+}
+
+/// One product page at one retailer — the thing the scraper polls.
+model TrackedUrl {
+  id            String        @id @default(cuid())
+  url           String        @unique // normalised: https, canonical host, no tracking params
+  retailer      Retailer
+  source        ListingSource @default(USER)
+  active        Boolean       @default(true)
+
+  productId     String?
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  title         String?
+  imageUrl      String?
+
+  // Current state (last *successful* check — a failed fetch never overwrites it)
+  status        StockStatus   @default(UNKNOWN)
+  pricePence    Int?
+  wasPricePence Int?
+  onSale        Boolean       @default(false)
+
+  // Scheduling
+  priority      Int           @default(0) // >0 = hot item, shorter poll interval
+  nextCheckAt   DateTime      @default(now())
+  lastCheckedAt DateTime?
+  lastChangedAt DateTime?
+  lastInStockAt DateTime?
+  failCount     Int           @default(0) // consecutive failed fetches (timeouts, blocks)
+  lastError     String?
+
+  checks        StockCheck[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([active, nextCheckAt])
+  @@index([status])
+  @@index([onSale])
+}
+
+/// Stock history. Written only when status/price changes or a check fails,
+/// so the free-tier database doesn't fill up with identical rows.
+model StockCheck {
+  id           String      @id @default(cuid())
+  trackedUrlId String
+  trackedUrl   TrackedUrl  @relation(fields: [trackedUrlId], references: [id], onDelete: Cascade)
+  status       StockStatus
+  pricePence   Int?
+  httpStatus   Int?
+  durationMs   Int?
+  error        String?
+  checkedAt    DateTime    @default(now())
+
+  @@index([trackedUrlId, checkedAt])
+}
+
+/// Upcoming releases and retailer allocation / raffle sign-ups (curated by hand).
+model Drop {
+  id            String       @id @default(cuid())
+  title         String
+  expansion     String?
+  type          ProductType?
+  retailer      Retailer?
+  releaseDate   DateTime?
+  allocationUrl String?      // sign-up / raffle / ballot link
+  notes         String?
+  createdAt     DateTime     @default(now())
+
+  @@index([releaseDate])
+}

@@ -1,0 +1,31 @@
+# Frequent scheduler for the free tier. Vercel Hobby crons can only run once a
+# day, so GitHub Actions pings the scrape endpoint instead.
+#
+# Repo → Settings → Secrets and variables → Actions:
+#   PEEK_URL     e.g. https://peek.vercel.app
+#   CRON_SECRET  same value as in Vercel
+#
+# Minutes: each run bills as 1 minute. Every 30 min ≈ 1,440 min/month, inside
+# the 2,000 free minutes for private repos (public repos are free). GitHub may
+# delay or skip scheduled runs under load — don't rely on exact timing.
+name: scrape
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger due stock checks
+        run: |
+          curl --fail-with-body -sS --max-time 75 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PEEK_URL }}/api/cron/scrape"
