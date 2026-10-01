@@ -127,9 +127,12 @@ export function isPublicHost(host: string): boolean {
   return true;
 }
 
-export type ResolvedUrl = { config: StoreConfig; url: string } | { error: string };
+export type ResolvedUrl =
+  | { config: StoreConfig; url: string }
+  | { shopHost: string } // a shop's homepage: scan its whole catalogue
+  | { error: string };
 
-/** Validate and normalise any pasted product URL. */
+/** Validate and normalise a pasted link: a product page, or a shop homepage (→ scan the whole shop). */
 export function resolveStore(raw: string): ResolvedUrl {
   let u: URL;
   try {
@@ -151,7 +154,7 @@ export function resolveStore(raw: string): ResolvedUrl {
     if (!KEEP_PARAMS.has(key.toLowerCase())) u.searchParams.delete(key);
   }
   if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, '');
-  if (u.pathname === '/' || u.pathname === '') return { error: 'Paste the link to a specific product page, not the shop’s homepage.' };
+  if (u.pathname === '/' || u.pathname === '') return { shopHost: u.hostname };
 
   return { config, url: u.toString() };
 }

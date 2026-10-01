@@ -48,8 +48,9 @@ enum Language {
 }
 
 enum ListingSource {
-  SEED // found by the daily discovery crawl
-  USER // pasted in by a user
+  SEED    // found by the daily discovery crawl of the built-in stores
+  USER    // pasted in by a user
+  CATALOG // found by scanning a whole shop's catalogue (see Shop)
 }
 
 /// A canonical product ("Perfect Order Elite Trainer Box"), shared by every
@@ -62,6 +63,7 @@ model Product {
   type      ProductType  @default(OTHER)
   language  Language     @default(EN)
   hot       Boolean      @default(false) // sought-after set: polled more often
+  rrpPence  Int?         // RRP set by the user; applies to this product at every shop
   listings  TrackedUrl[]
   createdAt DateTime     @default(now())
 
@@ -87,6 +89,7 @@ model TrackedUrl {
   pricePence    Int?
   wasPricePence Int?
   onSale        Boolean       @default(false)
+  rrpPence      Int?          // RRP printed on the shop's own page, if any
 
   // Scheduling
   priority      Int           @default(0) // >0 = hot item, shorter poll interval
@@ -135,4 +138,41 @@ model Drop {
   createdAt     DateTime     @default(now())
 
   @@index([releaseDate])
+}
+
+/// A shop whose whole catalogue is scanned for Pokémon TCG products
+/// (Shopify shops only: they publish /products.json).
+model Shop {
+  id            String    @id @default(cuid())
+  host          String    @unique
+  name          String
+  enabled       Boolean   @default(true)
+  scanPage      Int       @default(1) // resume point: big catalogues span several runs
+  nextScanAt    DateTime  @default(now())
+  lastScannedAt DateTime?
+  productsFound Int       @default(0)
+  lastError     String?
+  createdAt     DateTime  @default(now())
+}
+
+/// Release news, deals and restock posts found in web/forum feeds.
+model DropItem {
+  id          String    @id @default(cuid())
+  url         String    @unique
+  title       String
+  source      String    // feed name, e.g. "HotUKDeals"
+  summary     String?
+  imageUrl    String?
+  releaseDate DateTime? // parsed from the text when a date is mentioned
+  publishedAt DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+  @@index([releaseDate])
+}
+
+/// Throttle for jobs that run less often than the 5-minute scheduler.
+model JobRun {
+  name      String   @id
+  lastRunAt DateTime
 }

@@ -1,7 +1,7 @@
 import type { StockStatus } from '@prisma/client';
 import type { RetailerConfig } from '../retailers';
 import { fetchHtml, FetchFailure, type FetchFailureKind } from './fetch';
-import { parseProductPage, type Signal } from './parse';
+import { findRrpPence, parseProductPage, type Signal } from './parse';
 
 export type ScrapeResult = {
   /** QUEUE / parsed status on success; UNKNOWN when the fetch failed. */
@@ -11,6 +11,7 @@ export type ScrapeResult = {
   imageUrl?: string;
   pricePence?: number;
   wasPricePence?: number;
+  rrpPence?: number;
   httpStatus?: number;
   durationMs: number;
   error?: string;
@@ -31,6 +32,7 @@ type ShopifyProduct = {
   price?: number; // pence
   compare_at_price?: number | null;
   featured_image?: string;
+  description?: string;
   variants?: ShopifyVariant[];
 };
 
@@ -63,6 +65,7 @@ async function tryShopify(url: string, timeoutMs: number): Promise<ScrapeResult 
       imageUrl: data.featured_image?.startsWith('//') ? `https:${data.featured_image}` : data.featured_image,
       pricePence: Number.isInteger(price) && price! > 0 ? price : undefined,
       wasPricePence: compare && price && compare > price ? compare : undefined,
+      rrpPence: findRrpPence(data.description?.replace(/<[^>]+>/g, ' ')),
       httpStatus: res.httpStatus,
       durationMs: Date.now() - started,
       signals: [{ status, source: 'shopify', weight: 4 }],

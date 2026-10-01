@@ -4,14 +4,16 @@ import { prisma } from '@/lib/db';
 import { resolveStore } from '@/lib/retailers';
 import { scrapeUrl } from '@/lib/scraper/scrape';
 import { applyResult } from '@/lib/scraper/run';
+import { addShop, scanShop } from '@/lib/scraper/catalog';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 /**
  * POST /api/track  { url: string }
- * Validates any shop's product URL, saves it, does a first
- * check immediately so the user sees a result, then leaves it to the cron.
+ * - A product link: save it, check it straight away, then keep polling it.
+ * - A shop's homepage: if it's a Shopify shop, add it to the shops Peek scans
+ *   and do a first quick scan.
  */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { url?: unknown };
@@ -22,10 +24,32 @@ export async function POST(req: Request) {
   const resolved = resolveStore(body.url);
   if ('error' in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
-  const existing = await prisma.trackedUrl.findUnique({ where: { url: resolved.url }, include: { product: true } });
+  if ('shopHost' in resolved) {
+    const added = await addShop(resolved.shopHost);
+    if (!added) {
+      return NextResponse.json(
+        {
+          error:
+            'Peek can only scan whole shops built on Shopify, and this one isn’t (or blocks it). Paste a product link from it instead.',
+        },
+        { status: 400 },
+      );
+    }
+    const scan = await scanShop(added.shop, Date.now() + 20_000);
+    revalidatePath('/');
+    return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: scan.found, finished: scan.finished });
+  }
+
+  const existing = await prisma.trackedUrl.findUnique({ where: { url: resolved.url } });
   if (existing) {
-    if (!existing.active) await prisma.trackedUrl.update({ where: { id: existing.id }, data: { active: true } });
-    return NextResponse.json({ created: false, listing: existing });
+    // Promote shop-scan finds to "tracked by you" so they're checked every few minutes.
+    if (!existing.active || existing.source === 'CATALOG') {
+      await prisma.trackedUrl.update({
+        where: { id: existing.id },
+        data: { active: true, source: 'USER', nextCheckAt: new Date() },
+      });
+    }
+    return NextResponse.json({ kind: 'product', created: false, listing: existing });
   }
 
   const item = await prisma.trackedUrl.create({
@@ -38,11 +62,7 @@ export async function POST(req: Request) {
 
   revalidatePath('/');
   return NextResponse.json(
-    {
-      created: true,
-      listing: updated,
-      firstCheck: { ok: result.ok, status: result.status, error: result.error },
-    },
+    { kind: 'product', created: true, listing: updated, firstCheck: { ok: result.ok, status: result.status, error: result.error } },
     { status: 201 },
   );
 }

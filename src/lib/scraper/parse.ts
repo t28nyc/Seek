@@ -24,6 +24,8 @@ export type ParsedPage = {
   imageUrl?: string;
   pricePence?: number;
   wasPricePence?: number;
+  /** RRP printed on the page ("RRP £54.99"), if any. */
+  rrpPence?: number;
 };
 
 // Tie-break order: most cautious first.
@@ -56,6 +58,13 @@ export function parsePricePence(v: unknown): number | undefined {
   if (!m) return undefined;
   const pence = Math.round(parseFloat(m[1]) * 100);
   return pence > 0 && pence < 10_000_000 ? pence : undefined;
+}
+
+/** Find an RRP written in page text: "RRP £54.99", "RRP: £54.99", "(RRP £55)". */
+export function findRrpPence(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const m = text.match(/\bR\.?R\.?P\.?\b[^£\d]{0,12}£\s?(\d{1,4}(?:[.,]\d{2})?)/i);
+  return m ? parsePricePence(m[1].replace(',', '.')) : undefined;
 }
 
 // ---------- JSON-LD ----------
@@ -280,6 +289,14 @@ export function parseProductPage(html: string, cfg: Pick<RetailerConfig, 'select
     pageUrl,
   );
 
+  // Look for an RRP in the main product area only (not in other products' tiles).
+  const rrpPence = findRrpPence(
+    $('[itemtype*="schema.org/Product"], [class*="product-detail" i], [class*="product-info" i], [class*="pdp" i], main')
+      .first()
+      .text()
+      .replace(/\s+/g, ' ') || $('body').text().replace(/\s+/g, ' ').slice(0, 20_000),
+  );
+
   signals.push(...textSignals($, sel));
 
   return {
@@ -289,5 +306,6 @@ export function parseProductPage(html: string, cfg: Pick<RetailerConfig, 'select
     imageUrl,
     pricePence,
     wasPricePence: wasPence && pricePence && wasPence > pricePence ? wasPence : undefined,
+    rrpPence,
   };
 }

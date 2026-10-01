@@ -4,6 +4,25 @@ Paste a product link from **any** shop and Peek keeps checking whether it's in s
 
 Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run on Vercel's free (Hobby) plan.
 
+## Main page
+
+- **In stock / Out of stock** — every tracked product, with a search box. Each card shows the current price, the RRP and the £ and % difference. Tap "+ Set RRP" on a card to set it; the RRP belongs to the product, so it applies at every shop. If a shop prints "RRP £x" on its page, Peek uses that until you set your own.
+- **Drops** — products up for pre-order or coming soon at the shops Peek scans, plus release news, restocks and deals read from web feeds (`lib/drops/feeds.ts`: HotUKDeals and PokeBeach to start; add any RSS/Atom feed).
+
+## Finding everything for sale
+
+Peek scans whole shop catalogues for Pokémon TCG sealed products (singles, accessories and event tickets are filtered out). This works for Shopify shops, which publish `/products.json`. Gum Gum Games and Total Cards are included to start; paste any Shopify shop's homepage into the box to add it. Each shop is rescanned about every 30 minutes.
+
+## Scheduled jobs
+
+The GitHub workflow calls three endpoints every 5 minutes; each decides for itself whether work is due:
+
+| Endpoint | Does |
+|---|---|
+| `/api/cron/scrape` | Checks tracked product pages that are due |
+| `/api/cron/scan` | Scans shop catalogues that are due |
+| `/api/cron/drops` | Reads drop/deal feeds (every 30 min) |
+
 ## Directory structure
 
 ```

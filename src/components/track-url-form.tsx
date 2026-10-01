@@ -35,8 +35,17 @@ export function TrackUrlForm() {
       const data = await res.json();
       if (!res.ok) {
         setMessage({ kind: 'error', text: data.error ?? 'Something went wrong.' });
+      } else if (data.kind === 'shop') {
+        setMessage({
+          kind: 'ok',
+          text: `Added ${data.shop}: found ${data.found} Pokémon product${data.found === 1 ? '' : 's'} so far${
+            data.finished ? '' : ' — the rest will appear over the next few minutes'
+          }.`,
+        });
+        setUrl('');
+        startTransition(() => router.refresh());
       } else if (!data.created) {
-        setMessage({ kind: 'ok', text: 'Already tracking that one.' });
+        setMessage({ kind: 'ok', text: 'Already tracking that one — it’s now checked every few minutes.' });
         setUrl('');
       } else {
         const name = data.listing?.title ?? 'Product';
@@ -60,15 +69,15 @@ export function TrackUrlForm() {
           required
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste any product link…"
-          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-white placeholder:text-white/50 focus:outline-none"
+          placeholder="Paste a product link or shop homepage…"
+          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-base text-white placeholder:text-white/50 focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
           disabled={busy}
           className="shrink-0 rounded-xl bg-yellow-300 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-yellow-200 disabled:opacity-60"
         >
-          {busy ? 'Checking…' : 'Track'}
+          {busy ? 'Checking…' : 'Add'}
         </button>
       </div>
       {message && (

@@ -23,10 +23,19 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
+    env:
+      AUTH: "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      BASE: ${{ secrets.PEEK_URL }}
     steps:
-      - name: Trigger due stock checks
-        run: |
-          curl --fail-with-body -sS --max-time 75 \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.PEEK_URL }}/api/cron/scrape"
+      # Each job decides for itself whether anything is due, so calling all
+      # three every 5 minutes is cheap. One failing doesn't stop the others.
+      - name: Check tracked products
+        continue-on-error: true
+        run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/scrape"
+      - name: Scan shop catalogues
+        continue-on-error: true
+        run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/scan"
+      - name: Read drop and deal feeds
+        continue-on-error: true
+        run: curl --fail-with-body -sS --max-time 75 -H "$AUTH" "$BASE/api/cron/drops"

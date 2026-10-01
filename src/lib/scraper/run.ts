@@ -75,6 +75,7 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
         pricePence,
         wasPricePence,
         onSale: !!(wasPricePence && pricePence && wasPricePence > pricePence),
+        ...(r.ok && r.rrpPence ? { rrpPence: r.rrpPence } : {}),
         title: item.title ?? r.title,
         imageUrl: item.imageUrl ?? r.imageUrl,
         productId,
