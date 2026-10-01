@@ -10,7 +10,8 @@
 import * as cheerio from 'cheerio';
 import { prisma } from '../db';
 import { fetchHtml } from '../scraper/fetch';
-import { extractReleaseDate, findAnyDate } from '../dates';
+import { extractReleaseDate } from '../dates';
+import { extractDropDetails, type DropDetails } from './extract';
 import { isPublicHost } from '../retailers';
 import { getFeeds, getSettings } from '../settings';
 
@@ -113,7 +114,16 @@ export function parseFeed(xml: string): FeedPost[] {
   return posts;
 }
 
-export type FeedResult = { feed: string; ok: boolean; matched: number; added: number; error?: string };
+export type FeedResult = {
+  feed: string;
+  ok: boolean;
+  matched: number; // relevant posts in the feed right now
+  added: number; // new this time
+  inStore?: number; // of the relevant posts: on In store
+  drops?: number; // on Product drops
+  deleted?: number; // deleted by you (stay hidden)
+  error?: string;
+};
 
 /** Fetch every feed and store new posts. Records per-feed results so the pages can show what worked. */
 export async function refreshDrops(): Promise<FeedResult[]> {
@@ -138,7 +148,19 @@ export async function refreshDrops(): Promise<FeedResult[]> {
               skipDuplicates: true, // also keeps posts you deleted deleted
             })
           : { count: 0 };
-        return { feed: feed.name, ok: true, matched: posts.length, added: count };
+        // Where did this feed's posts end up? (Shown in the Sources panel.)
+        const rows = posts.length
+          ? await prisma.dropItem.findMany({ where: { url: { in: posts.map((p) => p.url) } }, select: { kind: true, hidden: true } })
+          : [];
+        return {
+          feed: feed.name,
+          ok: true,
+          matched: posts.length,
+          added: count,
+          inStore: rows.filter((r) => !r.hidden && r.kind === 'in-store').length,
+          drops: rows.filter((r) => !r.hidden && r.kind === 'online').length,
+          deleted: rows.filter((r) => r.hidden).length,
+        };
       } catch (e) {
         return { feed: feed.name, ok: false, matched: 0, added: 0, error: e instanceof Error ? e.message : String(e) };
       }
@@ -179,10 +201,44 @@ export async function feedStatus() {
 
 export const ADDED_BY_YOU = 'Added by you';
 
+/** Read a drop/product page: title, image, price, status, expected date, entry link, purchase limit. */
+async function readDropPage(url: string): Promise<(DropDetails & { summary?: string }) | null> {
+  try {
+    const { html, finalUrl } = await fetchHtml(url, { timeoutMs: 8_000, retries: 0 });
+    const details = extractDropDetails(html, finalUrl);
+    const $ = cheerio.load(html);
+    // Event pages: schema.org Event start date is the most reliable date
+    if (!details.releaseDate) {
+      $('script[type="application/ld+json"]').each((_, el) => {
+        if (details.releaseDate) return;
+        const m = ($(el).html() ?? '').match(/"startDate"\s*:\s*"([^"]+)"/);
+        if (m && !Number.isNaN(new Date(m[1]).getTime())) details.releaseDate = new Date(m[1]);
+      });
+    }
+    const description = ($('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content'))?.trim();
+    return { ...details, summary: details.notes.length ? details.notes.join(' · ') : description?.slice(0, 300) };
+  } catch {
+    return null;
+  }
+}
+
+const detailFields = (d: Awaited<ReturnType<typeof readDropPage>>) =>
+  d
+    ? {
+        status: d.status ?? null,
+        pricePence: d.pricePence ?? null,
+        entryUrl: d.entryUrl ?? null,
+        purchaseLimit: d.purchaseLimit ?? null,
+        ...(d.imageUrl && { imageUrl: d.imageUrl }),
+        ...(d.summary && { summary: d.summary.slice(0, 400) }),
+        checkedAt: new Date(),
+      }
+    : {};
+
 /**
- * Add a drop or in-store link by hand. Reads the page for a title, image and
- * date (event start date, publish date, or a date in the text); anything
- * passed in overrides what's found.
+ * Add a drop or in-store link by hand. Reads the page for the title, image,
+ * price, status (product drop, raffle, pre-order…), expected date, where to
+ * enter and any purchase limit. A date or title you give overrides what's found.
  */
 export async function addDropLink(input: { url: string; kind: 'online' | 'in-store'; title?: string; date?: Date }) {
   let u: URL;
@@ -194,42 +250,51 @@ export async function addDropLink(input: { url: string; kind: 'online' | 'in-sto
   if (!isPublicHost(u.hostname)) throw new Error('That address isn’t a public website.');
   u.hash = '';
 
-  let title = input.title?.trim();
-  let imageUrl: string | undefined;
-  let date = input.date;
-  let summary: string | undefined;
-  try {
-    const { html, finalUrl } = await fetchHtml(u.toString(), { timeoutMs: 8_000, retries: 0 });
-    const $ = cheerio.load(html);
-    title ||= ($('meta[property="og:title"]').attr('content') || $('title').first().text() || $('h1').first().text()).trim();
-    summary = ($('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content'))?.trim();
-    const img = $('meta[property="og:image"]').attr('content');
-    if (img) imageUrl = new URL(img, finalUrl).toString();
-    if (!date) {
-      // schema.org Event start date is the most reliable for events
-      $('script[type="application/ld+json"]').each((_, el) => {
-        if (date) return;
-        const m = ($(el).html() ?? '').match(/"startDate"\s*:\s*"([^"]+)"/);
-        if (m && !Number.isNaN(new Date(m[1]).getTime())) date = new Date(m[1]);
-      });
-    }
-    date ||= findAnyDate(`${title} ${summary ?? ''}`);
-  } catch {
-    /* page unreadable: still save the link with whatever was given */
-  }
+  const details = await readDropPage(u.toString());
+  const title = (input.title?.trim() || details?.title || u.hostname).slice(0, 300);
+  const releaseDate = input.date ?? details?.releaseDate ?? null;
 
   return prisma.dropItem.upsert({
     where: { url: u.toString() },
-    update: { hidden: false, kind: input.kind, ...(input.title && { title: input.title }), ...(input.date && { releaseDate: input.date }) },
+    update: { hidden: false, kind: input.kind, title, releaseDate, ...detailFields(details) },
     create: {
       url: u.toString(),
-      title: (title || u.hostname).slice(0, 300),
+      title,
       kind: input.kind,
       source: ADDED_BY_YOU,
-      summary: summary?.slice(0, 400),
-      imageUrl,
-      releaseDate: date,
+      releaseDate,
       publishedAt: new Date(),
+      ...detailFields(details),
     },
   });
+}
+
+/**
+ * Re-read links you added (status, date and price change as a drop
+ * approaches). Runs with the drop feeds, at most every 3 hours, oldest first.
+ */
+export async function recheckAddedDrops(limit = 15, minAgeMs = 3 * 3_600_000, budgetMs = 40_000) {
+  const deadline = Date.now() + budgetMs;
+  const items = await prisma.dropItem.findMany({
+    where: {
+      source: ADDED_BY_YOU,
+      hidden: false,
+      OR: [{ checkedAt: null }, { checkedAt: { lt: new Date(Date.now() - minAgeMs) } }],
+    },
+    orderBy: { checkedAt: { sort: 'asc', nulls: 'first' } },
+    take: limit,
+  });
+  let updated = 0;
+  for (const item of items) {
+    if (Date.now() > deadline) break;
+    const d = await readDropPage(item.url);
+    await prisma.dropItem.update({
+      where: { id: item.id },
+      data: d
+        ? { ...detailFields(d), ...(d.releaseDate && { releaseDate: d.releaseDate }) }
+        : { checkedAt: new Date() },
+    });
+    if (d) updated++;
+  }
+  return { checked: items.length, updated };
 }

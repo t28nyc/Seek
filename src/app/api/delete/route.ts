@@ -10,7 +10,8 @@ type Body =
   | { target: 'listings'; filters: Record<string, string> } // "Delete all" on the Online page
   | { target: 'drop'; id: string }
   | { target: 'drops'; kind: 'online' | 'in-store' } // "Delete all" on Drops / In store
-  | { target: 'shop'; id: string }; // stop scanning a website and remove what it found
+  | { target: 'shop'; id: string } // stop scanning a website and remove what it found
+  | { target: 'restore'; kind: 'online' | 'in-store' }; // bring back deleted drops / in-store items
 
 /**
  * Deleting hides rather than erases: scans and feeds would otherwise add the
@@ -56,6 +57,11 @@ export async function POST(req: Request) {
           data: { active: false },
         })
       ).count;
+      break;
+    }
+    case 'restore': {
+      if (body.kind !== 'online' && body.kind !== 'in-store') return NextResponse.json({ error: 'Bad kind.' }, { status: 400 });
+      count = (await prisma.dropItem.updateMany({ where: { kind: body.kind, hidden: true }, data: { hidden: false } })).count;
       break;
     }
     default:

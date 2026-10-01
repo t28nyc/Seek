@@ -97,7 +97,7 @@ export function GeneralSettingsForm({ fields }: { fields: Field[] }) {
             </span>
           ) : (
             <textarea
-              rows={2}
+              rows={String(values[f.key]).length > 200 ? 5 : 3}
               value={String(values[f.key])}
               onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
               className={input}
@@ -211,6 +211,14 @@ export function RrpTableEditor({ rules }: { rules: RuleRow[] }) {
       </div>
 
       <ol className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+        {/* Column headings (wider screens) */}
+        <li className="hidden grid-cols-[1.5rem_minmax(0,1.1fr)_minmax(0,1.6fr)_7.5rem_9.5rem] items-center gap-3 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 sm:grid dark:bg-zinc-800/50">
+          <span>#</span>
+          <span>Item</span>
+          <span>Matches names containing</span>
+          <span className="text-right">Price range</span>
+          <span className="text-right">Actions</span>
+        </li>
         {rules.map((r, i) => (
           <li key={r.id} className={`flex flex-col gap-2 p-3 ${r.enabled ? '' : 'opacity-50'}`}>
             {editing === r.id ? (
@@ -222,19 +230,26 @@ export function RrpTableEditor({ rules }: { rules: RuleRow[] }) {
                 onSubmit={(v) => run({ section: 'rrp', action: 'update', id: r.id, values: v }, () => setEditing(null))}
               />
             ) : (
-              <div className="flex items-start gap-2">
-                <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-zinc-400">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
+              <div className="flex items-start gap-2 sm:grid sm:grid-cols-[1.5rem_minmax(0,1.1fr)_minmax(0,1.6fr)_7.5rem_9.5rem] sm:items-center sm:gap-3">
+                <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-zinc-400 sm:mt-0 sm:text-left">{i + 1}</span>
+                <div className="min-w-0 flex-1 sm:contents">
+                  <div className="flex flex-wrap items-baseline gap-x-2 sm:block">
                     <span className="text-sm font-semibold">{r.name}</span>
-                    <span className="text-sm tabular-nums">
+                    <span className="text-sm tabular-nums sm:hidden">
                       {r.lowPence ? `${fmt(r.lowPence)} – ` : ''}
                       <strong>{fmt(r.rrpPence)}</strong>
                     </span>
                   </div>
-                  <p className="truncate text-[11px] text-zinc-500">Matches: {r.keywords}</p>
+                  <p className="truncate text-[11px] text-zinc-500 sm:whitespace-normal sm:text-xs">
+                    <span className="sm:hidden">Matches: </span>
+                    {r.keywords}
+                  </p>
+                  <span className="hidden text-right text-sm tabular-nums sm:block">
+                    {r.lowPence ? <span className="text-zinc-500">{fmt(r.lowPence)} – </span> : null}
+                    <strong>{fmt(r.rrpPence)}</strong>
+                  </span>
                 </div>
-                <div className="flex shrink-0 items-center">
+                <div className="flex shrink-0 items-center sm:justify-end">
                   <button className={iconBtn} disabled={busy || i === 0} onClick={() => run({ section: 'rrp', action: 'up', id: r.id })} aria-label="Move up">
                     ↑
                   </button>

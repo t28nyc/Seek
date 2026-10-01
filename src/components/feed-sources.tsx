@@ -22,8 +22,14 @@ export async function FeedSources() {
                 {f.name}
                 <span className="text-zinc-400"> · {f.page === 'auto' ? 'drops & in store' : f.page === 'in-store' ? 'in store' : 'drops'}</span>
               </span>
-              <span className={`shrink-0 ${!r ? 'text-zinc-400' : r.ok ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {!r ? '—' : r.ok ? `✓ ${r.matched} relevant` : `✗ ${r.error?.slice(0, 40)}`}
+              <span className={`shrink-0 text-right ${!r ? 'text-zinc-400' : r.ok ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {!r
+                  ? '—'
+                  : !r.ok
+                    ? `✗ ${r.error?.slice(0, 40)}`
+                    : r.inStore === undefined
+                      ? `✓ ${r.matched} relevant`
+                      : `✓ ${r.matched} relevant: ${r.inStore} in store · ${r.drops} drops${r.deleted ? ` · ${r.deleted} deleted` : ''}`}
               </span>
             </li>
           );
@@ -31,7 +37,7 @@ export async function FeedSources() {
       </ul>
       <p className="border-t border-zinc-100 px-4 py-2 text-[11px] text-zinc-500 dark:border-zinc-800">
         Plus links you add.{' '}
-        <Link href="/settings#sources" className="underline">
+        <Link href="/settings?tab=sources" className="underline">
           Add or remove sources in Settings
         </Link>
       </p>

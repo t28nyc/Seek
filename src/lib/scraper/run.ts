@@ -47,7 +47,8 @@ export function nextDelayMs(o: {
     }
   }
   // Up to 20% early/late so checks spread out; a slightly-early 5 min still lands on the next run.
-  if (o.fromScan && o.ok && o.priority <= 0) base = Math.max(base, settings.checkScannedMin * MIN);
+  // Products found by scanning are checked less often (priority ones at the normal rate) so big sites aren't hammered.
+  if (o.fromScan && o.ok) base = Math.max(base, (o.priority > 0 ? settings.checkNormalMin : settings.checkScannedMin) * MIN);
   return Math.round(base * (0.8 + Math.random() * 0.4));
 }
 

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 import { claimJob } from '@/lib/jobs';
 import { runDueChecks } from '@/lib/scraper/run';
 import { runDueScans } from '@/lib/scraper/catalog';
-import { refreshDrops } from '@/lib/drops/feeds';
+import { recheckAddedDrops, refreshDrops } from '@/lib/drops/feeds';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -30,7 +30,7 @@ export async function POST() {
   ]);
 
   after(async () => {
-    await Promise.allSettled([runDueChecks({ budgetMs: 45_000, limit: 80 }), runDueScans(45_000), refreshDrops()]);
+    await Promise.allSettled([runDueChecks({ budgetMs: 45_000, limit: 80 }), runDueScans(45_000), refreshDrops(), recheckAddedDrops(10, 60_000)]);
     revalidatePath('/', 'layout');
   });
 

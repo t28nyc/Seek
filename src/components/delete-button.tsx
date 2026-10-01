@@ -33,7 +33,7 @@ export function DeleteButton({
     }).catch(() => null);
     setBusy(false);
     if (!res?.ok) {
-      window.alert('Couldn’t delete — try again.');
+      window.alert('That didn’t work — try again.');
       return;
     }
     router.refresh();
@@ -50,7 +50,7 @@ export function DeleteButton({
           'rounded-full px-3 py-1.5 text-xs font-semibold text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-50 disabled:opacity-50 dark:ring-rose-900 dark:hover:bg-rose-950'
         }
       >
-        {busy ? 'Deleting…' : label}
+        {busy ? 'Working…' : label}
       </button>
     );
   }

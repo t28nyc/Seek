@@ -172,6 +172,12 @@ model DropItem {
   releaseDate DateTime? // parsed from the text when a date is mentioned
   publishedAt DateTime
   hidden      Boolean   @default(false) // deleted by the user; kept so feeds don't add it back
+  // Read from the page for links you add (product pages):
+  status      String?   // "Product drop" | "Raffle" | "Pre-order" | "Coming soon" | "In stock" | "Sold out"
+  pricePence  Int?
+  entryUrl    String?   // where to enter the drop/raffle, if the page links to it
+  purchaseLimit Int?    // "limited to 1 per customer"
+  checkedAt   DateTime? // last time the page was re-read
   createdAt   DateTime  @default(now())
 
   @@index([publishedAt])

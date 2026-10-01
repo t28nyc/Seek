@@ -17,15 +17,21 @@ Deleting hides items rather than erasing them, so scans and feeds don't add them
 
 `lib/drops/feeds.ts` — HotUKDeals (UK deals forum), PokeBeach (TCG news) and several **Bing News searches** (UK edition): Bing publishes any news search as RSS, which is how Peek searches the web without a paid API. Each page has a "Sources" panel showing what each source found last time.
 
+## Links added to Product drops / In store
+
+`lib/drops/extract.ts` reads the page for: title, product image, price, status (**Product drop**, **Raffle**, **Pre-order**, **Coming soon**, In stock, Sold out), the expected/drop date ("Expected 06/11/2026", "Release date: 14th November", "Ballot closes 3rd Nov", "Dispatches from 7 November"…), the link to enter the drop, and purchase limits ("limited to only purchasing 1"). Added links are re-read every 3 hours (and on Refresh) as drops get closer.
+
+Deleted items can be brought back with **Restore**; In store shows how many items its word filter hides, with a link to show them. The Sources panel shows where each source's posts went (in store / drops / deleted).
+
 ## RRP
 
 Worked out automatically, best source first: set by you → "RRP £x" (or MSRP / recommended retail price) printed on any shop's page or Shopify description for that product → the Pokémon Center UK price → the **RRP table** on the Settings page (matched on the product name) → the most common "was" price across shops. Tap the RRP on any row to set your own; it applies to that product at every shop. Every row shows Price | RRP | vs RRP (£ and %).
 
-## Settings (`/settings`, gear icon)
+## Settings (`/settings`, gear icon — tabs: RRP table, Sources, Checking & keywords, Websites)
 
 - **RRP table** — add, edit, remove, turn off and reorder rows (first matching row wins), with a "try a product name" tester and reset to defaults.
 - **Drop & in-store sources** — add an RSS link or just search words (becomes a web search), choose which page it feeds, turn off, remove, reorder.
-- **Checking & keywords** — check intervals, priority keywords, words that leave products out of website scans, words that hide items from In store (it shows releases only), how long drops are kept, whether the RRP table applies to Japanese products.
+- **Checking & keywords** — check intervals, priority keywords (Pokémon, product types and set names by default), words that leave products out of website scans, words that hide items from In store (it shows releases only), how long drops are kept, whether the RRP table applies to Japanese products.
 - **Websites** — the sites being scanned.
 
 Stored in the `Setting`, `RrpRule` and `FeedSource` tables; defaults in `lib/settings.ts`.

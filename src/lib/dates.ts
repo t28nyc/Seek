@@ -40,3 +40,26 @@ export function findAnyDate(text: string, now = new Date()): Date | undefined {
   const n = text.match(NUMERIC_RE);
   return n ? build(Number(n[1]), Number(n[2]) - 1, n[3], now) : undefined;
 }
+
+// dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy or dd/mm/yy (UK order)
+const NUMERIC_ANY = '(\\d{1,2})[/.-](\\d{1,2})[/.-]((?:20)?\\d{2})';
+
+/** Words that put a date next to a release/availability ("Expected 06/11/2026", "Release date: 6th November"). */
+const RELEASE_WORDS =
+  '(?:expected|release(?:s|d)?(?: date)?|releasing|available (?:from|on)|availability|launch(?:es|ing)?|out on|due(?: out| in)?|dispatch(?:ed|es)?(?: from| on)?|ships?(?: from| on)?|street date|pre-?order(?:s)? (?:close|end)s?|drop(?:s|ping)? on|on sale(?: from)?|(?:draw|ballot|raffle|entries|entry) (?:closes?|ends?)|closing date)';
+
+/**
+ * A date written next to a release/availability word, in words or numbers.
+ * Used on product pages, where dates are usually numeric ("Expected 06/11/2026").
+ */
+export function findDateNear(text: string, now = new Date()): Date | undefined {
+  const re = new RegExp(`${RELEASE_WORDS}[^.\\n]{0,30}?(?:${NUMERIC_ANY}|${DATE_RE})`, 'i');
+  const m = text.match(re);
+  if (!m) return undefined;
+  if (m[1]) {
+    const year = m[3].length === 2 ? `20${m[3]}` : m[3];
+    return build(Number(m[1]), Number(m[2]) - 1, year, now);
+  }
+  // Textual date: groups shift by the three numeric groups
+  return fromMatch(m, 3, now);
+}

@@ -23,13 +23,25 @@ export type GeneralSettings = {
   rrpForJapanese: boolean;
 };
 
+const OLD_PRIORITY_DEFAULT = 'perfect order, nihil zero, paradox rift, prismatic evolutions, destined rivals';
+const PRIORITY_DEFAULT = [
+  // everything Pokémon (remove this to make only the items below a priority)
+  'pokemon',
+  // product types
+  'elite trainer box', 'etb', 'booster box', 'booster display', 'booster bundle', 'booster pack', 'premium collection',
+  'super premium collection', 'ultra premium collection', 'pokemon center',
+  // sets
+  'perfect order', 'nihil zero', 'delta reign', 'chaos rising', '30th celebration', 'mega evolution', 'phantasmal flames',
+  'paradox rift', 'prismatic evolutions', 'destined rivals', 'journey together', 'surging sparks', 'black bolt', 'white flare',
+].join(', ');
+
 export const DEFAULT_SETTINGS: GeneralSettings = {
   checkHotMin: 5,
   checkInStockMin: 10,
   checkNormalMin: 20,
   checkScannedMin: 120,
   rescanShopsMin: 30,
-  priorityKeywords: 'perfect order, nihil zero, paradox rift, prismatic evolutions, destined rivals',
+  priorityKeywords: PRIORITY_DEFAULT,
   excludeFromScans:
     'event, ticket, tournament, league, sleeves, playmat, deck box, toploader, portfolio, 9 pocket, 4 pocket, card binder, plush, figure, t shirt, hoodie, mug, keyring, poster',
   inStoreExclude:
@@ -44,7 +56,10 @@ export const SETTING_LABELS: Record<keyof GeneralSettings, { label: string; help
   checkNormalMin: { label: 'Check other products every', help: 'Out-of-stock links you added.', unit: 'min' },
   checkScannedMin: { label: 'Check products found by scanning every', help: 'From sitemaps and category pages (Shopify shops are covered by the rescan).', unit: 'min' },
   rescanShopsMin: { label: 'Rescan Shopify shops every', help: 'Reads the whole catalogue again, with stock and prices.', unit: 'min' },
-  priorityKeywords: { label: 'Priority keywords', help: 'Products whose names contain any of these are checked most often. Comma-separated.' },
+  priorityKeywords: {
+    label: 'Priority keywords',
+    help: 'Products whose names contain any of these are checked most often and listed first. Comma-separated. “pokemon” makes every product a priority — remove it to focus on the sets and product types listed.',
+  },
   excludeFromScans: { label: 'Leave out of website scans', help: 'Products containing any of these phrases are skipped (accessories, tickets…). Comma-separated.' },
   inStoreExclude: { label: 'Hide from In store', help: 'In store shows releases only; items mentioning any of these are hidden. Comma-separated.' },
   dropsKeepDays: { label: 'Keep drops and news for', help: 'Older posts drop off the pages.', unit: 'days' },
@@ -63,6 +78,19 @@ export async function getSettings(): Promise<GeneralSettings> {
       (value as Record<string, unknown>)[r.key] = JSON.parse(r.value);
     } catch {
       /* ignore bad value */
+    }
+  }
+  // One-off upgrade: the original short priority list becomes the fuller default.
+  const stored = rows.find((r) => r.key === 'priorityKeywords');
+  if (!stored || stored.value === JSON.stringify(OLD_PRIORITY_DEFAULT)) {
+    value.priorityKeywords = PRIORITY_DEFAULT;
+    if (!rows.some((r) => r.key === 'migrated.priority2')) {
+      await prisma.setting.upsert({
+        where: { key: 'migrated.priority2' },
+        update: { value: 'true' },
+        create: { key: 'migrated.priority2', value: 'true' },
+      });
+      await recomputePriorities(PRIORITY_DEFAULT);
     }
   }
   cache = { at: Date.now(), value };
