@@ -16,6 +16,8 @@ export function nextDelayMs(o: {
   ok: boolean;
   failCount: number;
   priority: number;
+  /** Items found by scanning a whole website are checked less often than links you added. */
+  fromScan?: boolean;
   retryAfterSec?: number;
 }): number {
   let base: number;
@@ -44,6 +46,7 @@ export function nextDelayMs(o: {
     }
   }
   // Up to 20% early/late so checks spread out; a slightly-early 5 min still lands on the next run.
+  if (o.fromScan && o.ok && o.priority <= 0) base = Math.max(base, o.status === 'IN_STOCK' ? 60 * MIN : 120 * MIN);
   return Math.round(base * (0.8 + Math.random() * 0.4));
 }
 
@@ -88,7 +91,7 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
         // Stop polling pages that have disappeared.
         ...(r.httpStatus === 404 || r.httpStatus === 410 ? { active: false } : {}),
         nextCheckAt: new Date(
-          now.getTime() + nextDelayMs({ status, ok: r.ok, failCount, priority, retryAfterSec: r.retryAfterSec }),
+          now.getTime() + nextDelayMs({ status, ok: r.ok, failCount, priority, fromScan: item.source === 'CATALOG', retryAfterSec: r.retryAfterSec }),
         ),
       },
     }),
@@ -131,7 +134,8 @@ export async function runDueChecks({ budgetMs = 40_000, limit = 40 } = {}) {
   const started = Date.now();
   const due = await prisma.trackedUrl.findMany({
     where: { active: true, nextCheckAt: { lte: new Date() } },
-    orderBy: [{ priority: 'desc' }, { nextCheckAt: 'asc' }],
+    // Hot sets first, then links you added (USER sorts before CATALOG), then the longest-waiting.
+    orderBy: [{ priority: 'desc' }, { source: 'asc' }, { nextCheckAt: 'asc' }],
     take: limit,
   });
 

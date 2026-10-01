@@ -15,12 +15,15 @@ export function RrpEditor({
   rrpPence,
   pricePence,
   rrpSource,
+  compact = false,
 }: {
   productId: string | null;
   rrpPence: number | null;
   pricePence: number | null;
   /** 'you' when set by the user, 'shop' when read from the shop's page. */
   rrpSource: 'you' | 'shop' | null;
+  /** One-line version for list rows. */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -111,6 +114,28 @@ export function RrpEditor({
       : diff > 0
         ? 'text-rose-600 dark:text-rose-400'
         : 'text-emerald-600 dark:text-emerald-400';
+
+  const diffText =
+    diff == null
+      ? ''
+      : diff === 0
+        ? 'at RRP'
+        : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} (${diff > 0 ? '+' : '−'}${Math.abs(pct!)}%)`;
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={() => productId && setEditing(true)}
+        disabled={!productId}
+        className="self-start text-left text-[11px] leading-tight text-zinc-500"
+        title={rrpSource === 'shop' ? 'RRP shown on the shop’s page — tap to change' : 'Tap to change RRP'}
+      >
+        RRP {fmt(rrpPence)}
+        {diffText && <span className={`ml-1 font-semibold tabular-nums ${tone}`}>{diffText}</span>}
+      </button>
+    );
+  }
 
   return (
     <button

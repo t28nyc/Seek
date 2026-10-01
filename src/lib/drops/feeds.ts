@@ -6,6 +6,7 @@
 import * as cheerio from 'cheerio';
 import { prisma } from '../db';
 import { fetchHtml } from '../scraper/fetch';
+import { extractReleaseDate } from '../dates';
 
 export type Feed = {
   name: string;
@@ -25,34 +26,17 @@ const NOT_TCG = /\b(gift card|pok[eé]mon go|switch|nintendo|t-shirt|hoodie|plus
 const DROP_WORDS =
   /\b(release|released|releasing|pre-?orders?|restock|restocked|back in stock|launch|launches|coming soon|available now|reveal|revealed|announce[sd]?|drop|allocation|raffle|ballot|queue|in stock|new set|expansion)\b/i;
 
+const IN_STORE = /\b(in[- ]?stores?|instore|pre-?release|local game stores?|LGS|store release|street date)\b/i;
+
+/** Posts about releases in physical shops go on the In Store page; everything else on Product Drops. */
+export function dropKind(title: string, summary: string): 'online' | 'in-store' {
+  return IN_STORE.test(`${title} ${summary}`) ? 'in-store' : 'online';
+}
+
 export function isDropPost(title: string, summary: string, kind: Feed['kind']): boolean {
   const text = `${title} ${summary}`;
   if (!TCG.test(text) || NOT_TCG.test(title)) return false;
   return kind === 'deal' || DROP_WORDS.test(title);
-}
-
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const MONTH_RE = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
-
-/**
- * Pull a release date out of text: "27th March", "March 27, 2026", "27 Mar 2026".
- * A date without a year is taken as the next time that date comes round.
- * Only dates near a release word count, so "posted 3 May" isn't read as a release.
- */
-export function extractReleaseDate(text: string, now = new Date()): Date | undefined {
-  const near = text.match(
-    new RegExp(`(releas\\w*|launch\\w*|out on|available|pre-?order\\w*|drops?|arriv\\w*)[^.]{0,40}?((\\d{1,2})(?:st|nd|rd|th)?\\s+${MONTH_RE}(?:,?\\s+(\\d{4}))?|${MONTH_RE}\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?)`, 'i'),
-  );
-  if (!near) return undefined;
-  const day = Number(near[3] ?? near[7]);
-  const monthName = (near[4] ?? near[6])?.slice(0, 3).toLowerCase();
-  const yearStr = near[5] ?? near[8];
-  const month = MONTHS.indexOf(monthName ?? '');
-  if (month < 0 || !day || day > 31) return undefined;
-  let year = yearStr ? Number(yearStr) : now.getUTCFullYear();
-  let d = new Date(Date.UTC(year, month, day, 12));
-  if (!yearStr && d.getTime() < now.getTime() - 14 * 86_400_000) d = new Date(Date.UTC(++year, month, day, 12));
-  return d;
 }
 
 export type FeedPost = { url: string; title: string; summary: string; imageUrl?: string; publishedAt: Date };
@@ -114,6 +98,7 @@ export async function refreshDrops() {
                 url: p.url,
                 title: p.title.slice(0, 300),
                 source: feed.name,
+                kind: dropKind(p.title, p.summary),
                 summary: p.summary || null,
                 imageUrl: p.imageUrl,
                 publishedAt: p.publishedAt,

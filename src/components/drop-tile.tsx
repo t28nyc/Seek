@@ -19,6 +19,9 @@ const LABEL_STYLE: Record<string, string> = {
   'Coming soon': 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
   Deal: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
   Allocation: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  'Pre-release': 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  Event: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+  Release: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
 };
 
 export function DropTile({ drop }: { drop: DropTileData }) {
@@ -49,10 +52,10 @@ export function DropTile({ drop }: { drop: DropTileData }) {
         <div className="mt-auto flex items-center justify-between gap-2 text-xs">
           <span className={upcoming ? 'font-semibold text-rose-600' : 'text-zinc-500'}>
             {upcoming
-              ? `Releases ${formatDay(drop.releaseDate!)}`
+              ? `${drop.label === 'Event' || drop.label === 'Pre-release' ? 'On' : 'Releases'} ${formatDay(drop.releaseDate!)}`
               : drop.publishedAt
                 ? `Posted ${timeAgo(drop.publishedAt)}`
-                : ''}
+                : 'Date to be confirmed'}
             {drop.pricePence ? ` · ${formatPence(drop.pricePence)}` : ''}
           </span>
           <span className="shrink-0 font-semibold text-zinc-900 dark:text-zinc-100">{drop.cta} →</span>

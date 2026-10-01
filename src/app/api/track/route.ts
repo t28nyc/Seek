@@ -7,13 +7,13 @@ import { applyResult } from '@/lib/scraper/run';
 import { addShop, scanShop } from '@/lib/scraper/catalog';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /**
  * POST /api/track  { url: string }
  * - A product link: save it, check it straight away, then keep polling it.
- * - A shop's homepage: if it's a Shopify shop, add it to the shops Peek scans
- *   and do a first quick scan.
+ * - A website's homepage: add it to the sites Peek scans for Pokémon products
+ *   (Shopify catalogue, or the site's sitemap) and do a first scan.
  */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { url?: unknown };
@@ -30,14 +30,19 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            'Peek can only scan whole shops built on Shopify, and this one isn’t (or blocks it). Paste a product link from it instead.',
+            'Couldn’t find any Pokémon products on that site — it may block scanning or not list products in a sitemap. Paste a product link from it instead.',
         },
         { status: 400 },
       );
     }
-    const scan = await scanShop(added.shop, Date.now() + 20_000);
+    if (added.platform === 'shopify') {
+      const scan = await scanShop(added.shop, Date.now() + 25_000);
+      revalidatePath('/');
+      return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: scan.found, finished: scan.finished });
+    }
     revalidatePath('/');
-    return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: scan.found, finished: scan.finished });
+    // Sitemap finds have no title/stock yet; they're checked over the next half hour.
+    return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: added.found, finished: false, pending: true });
   }
 
   const existing = await prisma.trackedUrl.findUnique({ where: { url: resolved.url } });

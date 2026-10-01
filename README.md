@@ -4,14 +4,21 @@ Paste a product link from **any** shop and Peek keeps checking whether it's in s
 
 Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run on Vercel's free (Hobby) plan.
 
-## Main page
+## Pages
 
-- **In stock / Out of stock** — every tracked product, with a search box. Each card shows the current price, the RRP and the £ and % difference. Tap "+ Set RRP" on a card to set it; the RRP belongs to the product, so it applies at every shop. If a shop prints "RRP £x" on its page, Peek uses that until you set your own.
-- **Drops** — products up for pre-order or coming soon at the shops Peek scans, plus release news, restocks and deals read from web feeds (`lib/drops/feeds.ts`: HotUKDeals and PokeBeach to start; add any RSS/Atom feed).
+- **Online** (`/`) — everything Peek knows about, as a compact list: status chips with counts (All / In stock / Pre-order / Out of stock), "Added by me", a shop filter, search, and 50 rows at a time. Each row shows price, RRP and the £/% difference (tap the RRP line to set it — it applies to that product at every shop). The box at the top takes a product link or a website.
+- **In store** (`/in-store`) — pre-release events, leagues and tournaments listed by scanned shops, plus set release dates from news, grouped by month, soonest first.
+- **Product drops** (`/drops`) — release, restock and deal posts from web feeds (`lib/drops/feeds.ts`), upcoming release dates first, then the latest posts by day.
+- **Refresh** (header) — checks your links, rescans every website and reads the feeds straight away (`/api/refresh`, limited to once per 30 seconds).
 
-## Finding everything for sale
+## Adding a whole website
 
-Peek scans whole shop catalogues for Pokémon TCG sealed products (singles, accessories and event tickets are filtered out). This works for Shopify shops, which publish `/products.json`. Gum Gum Games and Total Cards are included to start; paste any Shopify shop's homepage into the box to add it. Each shop is rescanned about every 30 minutes.
+Paste a shop's homepage into the box on the Online page:
+
+- **Shopify shops** (most independent UK card shops): the whole catalogue is read from `/products.json`, with stock and prices, and rescanned every ~30 minutes. Event tickets go to the In store page.
+- **Any other site**: Peek reads the site's sitemap (via robots.txt), keeps URLs that look like Pokémon sealed products (up to 400), and checks each one like a pasted link. Found items are checked every 1–2 hours; the sitemap is re-read daily.
+
+Singles, accessories and merch are filtered out. Gum Gum Games and Total Cards are scanned out of the box.
 
 ## Scheduled jobs
 
