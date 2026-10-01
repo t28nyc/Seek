@@ -1,54 +1,69 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-type PartResult = { part: string; skipped?: string; checked?: number; changed?: number; remaining?: number; found?: number; added?: number; error?: string };
-
-/** Checks products, rescans shops and reads drop feeds right now (three requests in parallel). */
+/**
+ * Starts a background refresh (products, websites, drop feeds), then reloads
+ * the page's data a few times while results come in. The button is free
+ * again after a moment; a small note shows that work is happening.
+ */
 export function RefreshButton() {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<'idle' | 'starting' | 'running'>('idle');
   const [note, setNote] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   async function refresh() {
-    setBusy(true);
-    setNote(null);
-    const results = await Promise.all(
-      ['products', 'shops', 'feeds'].map((part) =>
-        fetch(`/api/refresh?part=${part}`, { method: 'POST' })
-          .then((r) => r.json() as Promise<PartResult>)
-          .catch(() => ({ part, error: 'failed' }) as PartResult),
-      ),
-    );
-    setBusy(false);
+    setState('starting');
+    const res = await fetch('/api/refresh', { method: 'POST' })
+      .then((r) => r.json() as Promise<{ started: boolean; links?: number; sites?: number; message?: string }>)
+      .catch(() => null);
 
-    if (results.every((r) => r.skipped)) {
-      setNote('Just refreshed');
-    } else {
-      const p = results.find((r) => r.part === 'products');
-      const changed = results.reduce((n, r) => n + (r.changed ?? 0) + (r.part === 'feeds' ? (r.added ?? 0) : 0), 0);
-      const more = p?.remaining ? ` · ${p.remaining} more queued` : '';
-      setNote(`${changed} update${changed === 1 ? '' : 's'}${more}`);
+    if (!res) {
+      setState('idle');
+      setNote('Couldn’t start a refresh — try again.');
+      return;
     }
-    startTransition(() => router.refresh());
-    setTimeout(() => setNote(null), 6_000);
+    setNote(
+      res.started
+        ? `Checking ${res.links} link${res.links === 1 ? '' : 's'}, ${res.sites} website${res.sites === 1 ? '' : 's'} and the drop feeds…`
+        : (res.message ?? 'Already refreshing'),
+    );
+    setState('running');
+    timers.current.forEach(clearTimeout);
+    timers.current = [8_000, 20_000, 40_000, 65_000].map((ms, i, all) =>
+      setTimeout(() => {
+        router.refresh();
+        if (i === all.length - 1) {
+          setState('idle');
+          setNote('Up to date');
+          timers.current.push(setTimeout(() => setNote(null), 5_000));
+        }
+      }, ms),
+    );
   }
 
+  const running = state !== 'idle';
   return (
     <div className="flex items-center gap-2">
-      {note && <span role="status" className="hidden text-xs text-white/70 sm:inline">{note}</span>}
+      {note && (
+        <span role="status" className="max-w-[9rem] truncate text-[11px] text-white/70 sm:max-w-64 sm:text-xs">
+          {note}
+        </span>
+      )}
       <button
         type="button"
         onClick={refresh}
-        disabled={busy}
+        disabled={state === 'starting'}
         title={note ?? 'Check everything now'}
         className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-yellow-300 px-3 text-sm font-semibold text-zinc-900 transition hover:bg-yellow-200 disabled:opacity-70"
       >
         <svg
           viewBox="0 0 24 24"
-          className={`size-4 ${busy ? 'animate-spin' : ''}`}
+          className={`size-4 ${running ? 'animate-spin' : ''}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2.5"
@@ -59,9 +74,8 @@ export function RefreshButton() {
           <path d="M21 12a9 9 0 1 1-2.64-6.36" />
           <path d="M21 3v6h-6" />
         </svg>
-        {busy ? 'Checking…' : 'Refresh'}
+        {state === 'starting' ? 'Starting…' : state === 'running' ? 'Updating' : 'Refresh'}
       </button>
-      {note && <span role="status" className="sr-only">{note}</span>}
     </div>
   );
 }

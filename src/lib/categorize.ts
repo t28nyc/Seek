@@ -27,6 +27,10 @@ export const EXPANSIONS: Expansion[] = [
     patterns: [/perfect order/i, /nihil zero/i, /munikisu/i, /\bme0?3\b/i],
     hot: true,
   },
+  // Newer sets seen at UK shops in 2026 — add more as they're announced.
+  { key: 'delta-reign', label: 'Delta Reign', patterns: [/delta reign/i] },
+  { key: 'chaos-rising', label: 'Chaos Rising', patterns: [/chaos rising/i] },
+  { key: '30th-celebration', label: '30th Celebration', patterns: [/30th (anniversary )?celebration/i] },
   { key: 'phantasmal-flames', label: 'Phantasmal Flames', patterns: [/phantasmal flames/i, /\bme0?2\b/i] },
   { key: 'paradox-rift', label: 'Paradox Rift', patterns: [/paradox rift/i, /\bsv0?4\b/i], hot: true },
   { key: 'prismatic-evolutions', label: 'Prismatic Evolutions', patterns: [/prismatic evolutions?/i], hot: true },

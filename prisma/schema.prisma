@@ -147,7 +147,8 @@ model Shop {
   id            String    @id @default(cuid())
   host          String    @unique
   name          String
-  platform      String    @default("shopify") // "shopify" (catalogue JSON) or "sitemap" (product URLs from sitemap.xml)
+  platform      String    @default("shopify") // "shopify" (catalogue JSON), "sitemap" (product URLs from sitemap.xml) or "listing" (product links on a category page)
+  collection    String?   // Shopify: scan only /collections/<this>. Listing: the category page URL. Null = whole shop.
   enabled       Boolean   @default(true)
   scanPage      Int       @default(1) // resume point: big catalogues span several runs
   nextScanAt    DateTime  @default(now())
@@ -170,6 +171,7 @@ model DropItem {
   imageUrl    String?
   releaseDate DateTime? // parsed from the text when a date is mentioned
   publishedAt DateTime
+  hidden      Boolean   @default(false) // deleted by the user; kept so feeds don't add it back
   createdAt   DateTime  @default(now())
 
   @@index([publishedAt])
@@ -181,4 +183,5 @@ model DropItem {
 model JobRun {
   name      String   @id
   lastRunAt DateTime
+  info      String?  // JSON summary of the last run, shown on the pages (e.g. which feeds worked)
 }

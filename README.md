@@ -6,19 +6,30 @@ Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run
 
 ## Pages
 
-- **Online** (`/`) — everything Peek knows about, as a compact list: status chips with counts (All / In stock / Pre-order / Out of stock), "Added by me", a shop filter, search, and 50 rows at a time. Each row shows price, RRP and the £/% difference (tap the RRP line to set it — it applies to that product at every shop). The box at the top takes a product link or a website.
-- **In store** (`/in-store`) — pre-release events, leagues and tournaments listed by scanned shops, plus set release dates from news, grouped by month, soonest first.
-- **Product drops** (`/drops`) — release, restock and deal posts from web feeds (`lib/drops/feeds.ts`), upcoming release dates first, then the latest posts by day.
-- **Refresh** (header) — checks your links, rescans every website and reads the feeds straight away (`/api/refresh`, limited to once per 30 seconds).
+- **Online** (`/`) — everything Peek tracks, as compact rows. Each row shows **Price | RRP | vs RRP (£ and %)**. Filters: status chips with counts, "Added by me", shop chips, search; 50 rows at a time. Delete one row (×) or "Delete all"/"Delete these" (applies to the current filters; asks first). The "Websites Peek scans" panel shows each site's scan status and lets you remove a site.
+- **In store** (`/in-store`) — pre-release events and tournaments from scanned shops, news about Pokémon cards in high-street shops (supermarkets, Smyths, Argos, Happy Meals…), and upcoming set release days; grouped by month. "+ Add a link" to add one by hand.
+- **Product drops** (`/drops`) — pre-orders, restocks, new sets and deals from the web; upcoming release dates first, then newest posts by day. "+ Add a link" too.
+- **Refresh** (header) — starts a background check of your links, every website and every feed; the page updates itself over the next minute.
+
+Deleting hides items rather than erasing them, so scans and feeds don't add them straight back.
+
+## Sources for drops and in-store
+
+`lib/drops/feeds.ts` — HotUKDeals (UK deals forum), PokeBeach (TCG news) and several **Bing News searches** (UK edition): Bing publishes any news search as RSS, which is how Peek searches the web without a paid API. Each page has a "Sources" panel showing what each source found last time.
+
+## RRP
+
+Worked out automatically, in this order: set by you → "RRP £x" printed on any shop's page for that product → the Pokémon Center UK price → the most common "was" price across shops. Otherwise a typical range for the product type is shown as a hint (`lib/rrp.ts`). Tap the RRP on any row to set your own; it applies to that product at every shop.
 
 ## Adding a whole website
 
-Paste a shop's homepage into the box on the Online page:
+Paste any of these into the box on the Online page:
 
-- **Shopify shops** (most independent UK card shops): the whole catalogue is read from `/products.json`, with stock and prices, and rescanned every ~30 minutes. Event tickets go to the In store page.
-- **Any other site**: Peek reads the site's sitemap (via robots.txt), keeps URLs that look like Pokémon sealed products (up to 400), and checks each one like a pasted link. Found items are checked every 1–2 hours; the sitemap is re-read daily.
+- **A homepage** — Shopify shops: the whole catalogue from `/products.json`, rescanned every ~30 minutes. Other sites: Pokémon product URLs from the sitemap (up to 400), re-read daily.
+- **A Shopify collection** (e.g. `/collections/pokemon`) — just that collection.
+- **Any other category page** — the Pokémon product links on it (following "next page" links), re-read daily.
 
-Singles, accessories and merch are filtered out. Gum Gum Games and Total Cards are scanned out of the box.
+Singles, accessories and merch are filtered out; event tickets go to the In store page.
 
 ## Scheduled jobs
 

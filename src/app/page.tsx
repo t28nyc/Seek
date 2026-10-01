@@ -1,38 +1,25 @@
 import Link from 'next/link';
-import type { Prisma, StockStatus } from '@prisma/client';
+import type { StockStatus } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { storeNameFromHost } from '@/lib/retailers';
+import { rrpForListings, TYPICAL_RANGES } from '@/lib/rrp';
+import { timeAgo } from '@/lib/format';
+import {
+  baseWhere,
+  filtersHref,
+  listWhere,
+  PAGE,
+  readFilters,
+  STATUS_FILTERS,
+  type StatusKey,
+} from '@/lib/online-filters';
 import { ListingRow } from '@/components/listing-row';
 import { TrackUrlForm } from '@/components/track-url-form';
+import { DeleteButton } from '@/components/delete-button';
 
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
-const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-
-const STATUS_FILTERS = {
-  all: { label: 'All', statuses: null },
-  in: { label: 'In stock', statuses: ['IN_STOCK', 'QUEUE'] },
-  pre: { label: 'Pre-order', statuses: ['PREORDER', 'COMING_SOON'] },
-  out: { label: 'Out of stock', statuses: ['OUT_OF_STOCK', 'UNKNOWN'] },
-} as const satisfies Record<string, { label: string; statuses: readonly StockStatus[] | null }>;
-type StatusKey = keyof typeof STATUS_FILTERS;
-
-const PAGE = 50;
-
-type Filters = { status: StatusKey; site?: string; mine: boolean; q: string; n: number };
-
-function href(f: Filters, patch: Partial<Filters>) {
-  const m = { ...f, ...patch };
-  const p = new URLSearchParams();
-  if (m.status !== 'all') p.set('status', m.status);
-  if (m.site) p.set('site', m.site);
-  if (m.mine) p.set('mine', '1');
-  if (m.q) p.set('q', m.q);
-  if (m.n > PAGE) p.set('n', String(m.n));
-  const s = p.toString();
-  return s ? `/?${s}` : '/';
-}
 
 function Chip({ to, active, children }: { to: string; active: boolean; children: React.ReactNode }) {
   return (
@@ -51,25 +38,8 @@ function Chip({ to, active, children }: { to: string; active: boolean; children:
 }
 
 export default async function OnlinePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const statusParam = one(sp.status) as StatusKey | undefined;
-  const f: Filters = {
-    status: statusParam && statusParam in STATUS_FILTERS ? statusParam : 'all',
-    site: one(sp.site)?.toLowerCase() || undefined,
-    mine: one(sp.mine) === '1',
-    q: (one(sp.q) ?? '').trim().slice(0, 80),
-    n: Math.min(Math.max(Number(one(sp.n)) || PAGE, PAGE), 1000),
-  };
-
-  // Everything except the status filter — used for the per-status counts.
-  const base: Prisma.TrackedUrlWhereInput = {
-    active: true,
-    ...(f.site && { url: { startsWith: `https://${f.site}/` } }),
-    ...(f.mine && { source: 'USER' as const }),
-    ...(f.q && { title: { contains: f.q, mode: 'insensitive' as const } }),
-  };
-  const statuses = STATUS_FILTERS[f.status].statuses;
-  const where: Prisma.TrackedUrlWhereInput = statuses ? { ...base, status: { in: [...statuses] } } : base;
+  const f = readFilters(await searchParams);
+  const where = listWhere(f);
 
   const [listings, total, byStatus, shops, mineUrls] = await Promise.all([
     prisma.trackedUrl.findMany({
@@ -80,10 +50,11 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
       take: f.n,
     }),
     prisma.trackedUrl.count({ where }),
-    prisma.trackedUrl.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
+    prisma.trackedUrl.groupBy({ by: ['status'], where: baseWhere(f), _count: { _all: true } }),
     prisma.shop.findMany({ where: { enabled: true }, orderBy: { name: 'asc' } }),
     prisma.trackedUrl.findMany({ where: { active: true, source: 'USER' }, select: { url: true }, take: 500 }),
   ]);
+  const rrps = await rrpForListings(listings);
 
   const countFor = (key: StatusKey) => {
     const s = STATUS_FILTERS[key].statuses as readonly StockStatus[] | null;
@@ -96,37 +67,93 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
     const host = new URL(url).hostname;
     if (!sites.has(host)) sites.set(host, storeNameFromHost(host));
   }
+  const now = Date.now();
+  const filtered = f.q || f.site || f.mine || f.status !== 'all';
+  const siteName = f.site ? (sites.get(f.site) ?? storeNameFromHost(f.site)) : null;
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-4 px-3 py-4 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-6">
-      <section className="rounded-2xl bg-zinc-900 p-4 text-white dark:bg-zinc-900">
+    <main className="mx-auto flex max-w-5xl flex-col gap-4 px-3 py-4 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-6">
+      <section className="rounded-2xl bg-zinc-900 p-4 text-white">
         <h1 className="mb-1 text-base font-bold">Add a product or a website</h1>
         <p className="mb-3 text-xs text-white/60">
-          Paste a product link to track it, or a shop’s homepage to find all of its Pokémon products.
+          Paste a product link to track it — or a shop’s homepage or Pokémon category page to find all of its Pokémon
+          products.
         </p>
         <TrackUrlForm />
       </section>
 
+      {shops.length > 0 && (
+        <details className="group rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">
+            <span>
+              Websites Peek scans <span className="font-normal text-zinc-500">({shops.length})</span>
+              {shops.some((s) => s.nextScanAt.getTime() <= now || s.scanPage > 1) && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-sky-600">
+                  <span className="size-1.5 animate-pulse rounded-full bg-current" /> scanning
+                </span>
+              )}
+            </span>
+            <span className="text-zinc-400 transition group-open:rotate-180">▾</span>
+          </summary>
+          <ul className="divide-y divide-zinc-100 border-t border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
+            {shops.map((s) => {
+              const scanning = s.nextScanAt.getTime() <= now || s.scanPage > 1;
+              const scope =
+                s.platform === 'listing'
+                  ? 'category page'
+                  : s.collection
+                    ? `“${s.collection}” collection`
+                    : s.platform === 'sitemap'
+                      ? 'whole site (sitemap)'
+                      : 'whole shop';
+              return (
+                <li key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <Link href={filtersHref(f, { site: s.host, n: PAGE })} className="text-sm font-medium hover:underline">
+                      {s.name}
+                    </Link>
+                    <p className="truncate text-[11px] text-zinc-500">
+                      {scope} · {s.productsFound} products ·{' '}
+                      {scanning ? (
+                        <span className="font-medium text-sky-600">scanning now…</span>
+                      ) : s.lastError ? (
+                        <span className="text-amber-600">{s.lastError}</span>
+                      ) : (
+                        `updated ${timeAgo(s.lastScannedAt)}`
+                      )}
+                    </p>
+                  </div>
+                  <DeleteButton
+                    body={{ target: 'shop', id: s.id }}
+                    confirmText={`Stop scanning ${s.name} and remove the products it found? Links you added yourself stay.`}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
+
       <section className="flex flex-col gap-2" aria-label="Filters">
         <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none]">
           {(Object.keys(STATUS_FILTERS) as StatusKey[]).map((k) => (
-            <Chip key={k} to={href(f, { status: k, n: PAGE })} active={f.status === k}>
+            <Chip key={k} to={filtersHref(f, { status: k, n: PAGE })} active={f.status === k}>
               {STATUS_FILTERS[k].label}
               <span className="text-xs tabular-nums opacity-60">{countFor(k)}</span>
             </Chip>
           ))}
-          <Chip to={href(f, { mine: !f.mine, n: PAGE })} active={f.mine}>
+          <Chip to={filtersHref(f, { mine: !f.mine, n: PAGE })} active={f.mine}>
             Added by me
           </Chip>
         </div>
 
         {sites.size > 1 && (
           <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none]">
-            <Chip to={href(f, { site: undefined, n: PAGE })} active={!f.site}>
+            <Chip to={filtersHref(f, { site: undefined, n: PAGE })} active={!f.site}>
               All shops
             </Chip>
             {[...sites].map(([host, name]) => (
-              <Chip key={host} to={href(f, { site: f.site === host ? undefined : host, n: PAGE })} active={f.site === host}>
+              <Chip key={host} to={filtersHref(f, { site: f.site === host ? undefined : host, n: PAGE })} active={f.site === host}>
                 {name}
               </Chip>
             ))}
@@ -150,9 +177,37 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
 
       {listings.length ? (
         <>
+          <div className="flex items-center justify-between gap-2 px-1 text-xs text-zinc-500">
+            <span>
+              {total} product{total === 1 ? '' : 's'}
+              {siteName ? ` at ${siteName}` : ''}
+            </span>
+            <DeleteButton
+              label={filtered ? `Delete these ${total}` : 'Delete all'}
+              body={{
+                target: 'listings',
+                filters: {
+                  status: f.status,
+                  ...(f.site && { site: f.site }),
+                  ...(f.mine && { mine: '1' }),
+                  ...(f.q && { q: f.q }),
+                },
+              }}
+              confirmText={
+                f.site && !f.q && !f.mine && f.status === 'all'
+                  ? `Delete all ${total} products from ${siteName} and stop scanning it? This can’t be undone.`
+                  : `Delete ${filtered ? 'these' : 'all'} ${total} product${total === 1 ? '' : 's'}? This can’t be undone.`
+              }
+            />
+          </div>
           <ul className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
             {listings.map((l) => (
-              <ListingRow key={l.id} listing={l} />
+              <ListingRow
+                key={l.id}
+                listing={l}
+                rrp={rrps.get(l.id) ?? null}
+                typical={l.product && l.product.language === 'EN' ? (TYPICAL_RANGES[l.product.type] ?? null) : null}
+              />
             ))}
           </ul>
           <div className="flex items-center justify-between px-1 text-xs text-zinc-500">
@@ -161,7 +216,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
             </span>
             {total > listings.length && (
               <Link
-                href={href(f, { n: f.n + PAGE })}
+                href={filtersHref(f, { n: f.n + PAGE })}
                 scroll={false}
                 className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-zinc-900 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-800"
               >
@@ -172,16 +227,9 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
         </>
       ) : (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-500 dark:border-zinc-700">
-          {f.q || f.site || f.mine || f.status !== 'all'
-            ? 'Nothing matches these filters.'
-            : 'Nothing here yet. Paste a product link or a shop’s homepage above.'}
+          {filtered ? 'Nothing matches these filters.' : 'Nothing here yet. Paste a product link or a shop’s website above.'}
         </div>
       )}
-
-      <footer className="mt-4 text-center text-xs leading-relaxed text-zinc-500">
-        Scanning {shops.length} website{shops.length === 1 ? '' : 's'} for Pokémon products
-        {shops.length ? `: ${shops.map((s) => s.name).join(', ')}` : ''}.
-      </footer>
     </main>
   );
 }

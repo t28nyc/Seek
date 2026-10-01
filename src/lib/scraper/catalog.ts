@@ -12,7 +12,7 @@
 import * as cheerio from 'cheerio';
 import type { Prisma, StockStatus, TrackedUrl } from '@prisma/client';
 import { prisma } from '../db';
-import { getStoreConfig, storeNameFromHost } from '../retailers';
+import { getStoreConfig, resolveStore, storeNameFromHost } from '../retailers';
 import { categorize } from '../categorize';
 import { linkProducts } from '../products';
 import { fetchHtml } from './fetch';
@@ -48,10 +48,13 @@ const SINGLE_CARD = /\b\d{1,3}\s?\/\s?\d{1,3}\b|\b(single|graded|psa|cgc|bgs)\b/
 const NOT_SEALED =
   /\b(event|ticket|tournament|league|sleeves|binder|playmat|deck ?box|toploader|portfolio|plush|figure|t-shirt|hoodie|mug|keyring|poster)\b/i;
 
-/** Pokémon TCG sealed product? (packs, boxes, ETBs, tins, collections…) — excludes singles and merch. */
-export function isPokemonSealed(p: ShopifyProduct): boolean {
+/**
+ * Pokémon TCG sealed product? (packs, boxes, ETBs, tins, collections…) — excludes singles and merch.
+ * `inPokemonCollection`: the product came from a Pokémon collection, so its title needn't say "Pokémon".
+ */
+export function isPokemonSealed(p: ShopifyProduct, inPokemonCollection = false): boolean {
   const tags = Array.isArray(p.tags) ? p.tags.join(' ') : (p.tags ?? '');
-  if (!/pok[eé]mon/i.test(`${p.title} ${p.product_type} ${p.vendor} ${tags}`)) return false;
+  if (!inPokemonCollection && !/pok[eé]mon/i.test(`${p.title} ${p.product_type} ${p.vendor} ${tags}`)) return false;
   if (SINGLE_CARD.test(`${p.title} ${p.product_type}`)) return false;
   if (NOT_SEALED.test(`${p.title} ${p.product_type}`)) return false;
   return categorize(p.title).type !== 'OTHER' || /\b(tcg|trading card|card game)\b/i.test(p.title);
@@ -124,9 +127,12 @@ function toItem(host: string, p: ShopifyProduct): ScannedItem {
 }
 
 /** Is this host a Shopify shop with a readable catalogue? Returns its first page if so. */
-export async function probeShopify(host: string): Promise<ShopifyProduct[] | null> {
+const catalogBase = (host: string, collection?: string | null) =>
+  `https://${host}${collection ? `/collections/${encodeURIComponent(collection)}` : ''}/products.json`;
+
+export async function probeShopify(host: string, collection?: string | null): Promise<ShopifyProduct[] | null> {
   try {
-    const { html } = await fetchHtml(`https://${host}/products.json?limit=${PAGE_SIZE}&page=1`, {
+    const { html } = await fetchHtml(`${catalogBase(host, collection)}?limit=${PAGE_SIZE}&page=1`, {
       timeoutMs: 10_000,
       retries: 0,
     });
@@ -224,10 +230,12 @@ async function saveItems(items: ScannedItem[]) {
  * Scan one shop for up to `budgetMs`, resuming from where the last run
  * stopped. A full pass ends when a page comes back short or empty.
  */
-type ShopRow = { id: string; host: string; name: string; platform: string; scanPage: number };
+type ShopRow = { id: string; host: string; name: string; platform: string; scanPage: number; collection: string | null };
 
 async function scanShop(shop: ShopRow, deadline: number) {
-  return shop.platform === 'sitemap' ? scanSitemapShop(shop, deadline) : scanShopifyShop(shop, deadline);
+  if (shop.platform === 'sitemap') return scanSitemapShop(shop, deadline);
+  if (shop.platform === 'listing') return scanListingShop(shop, deadline);
+  return scanShopifyShop(shop, deadline);
 }
 
 async function scanShopifyShop(shop: ShopRow, deadline: number) {
@@ -240,13 +248,14 @@ async function scanShopifyShop(shop: ShopRow, deadline: number) {
 
   while (Date.now() < deadline) {
     try {
-      const { html } = await fetchHtml(`https://${shop.host}/products.json?limit=${PAGE_SIZE}&page=${page}`, {
+      const { html } = await fetchHtml(`${catalogBase(shop.host, shop.collection)}?limit=${PAGE_SIZE}&page=${page}`, {
         timeoutMs: 10_000,
         retries: 1,
       });
       const products = (JSON.parse(html) as { products?: ShopifyProduct[] }).products ?? [];
       await saveEvents(shop.name, shop.host, products);
-      const items = products.filter(isPokemonSealed).map((p) => toItem(shop.host, p));
+      const pokemonCollection = !!shop.collection && /pok/i.test(shop.collection);
+      const items = products.filter((p) => isPokemonSealed(p, pokemonCollection)).map((p) => toItem(shop.host, p));
       found += items.length;
       const saved = await saveItems(items);
       added += saved.added;
@@ -348,8 +357,77 @@ export async function sitemapProductUrls(host: string, deadline: number, max = 4
   return [...found];
 }
 
-/** Queue sitemap finds for checking, spread over the next 30 minutes so a site isn't hit all at once. */
-async function saveSitemapUrls(urls: string[]) {
+// ---------- Category/listing pages (any website) ----------
+
+const NON_PRODUCT_PATH = /\/(category|categories|collections?|c|brands?|tags?|search|pages?|blog|news|account|cart|basket|login|wishlist)(\/|$)/i;
+
+/** Anchor text that reads like a Pokémon TCG product title. */
+function looksLikePokemonProductText(text: string, u: URL): boolean {
+  if (text.length < 8 || text.length > 200 || NON_PRODUCT_PATH.test(u.pathname)) return false;
+  const c = categorize(text);
+  if (!/pok[eé]mon/i.test(text) && !c.expansion) return false;
+  if (SINGLE_CARD.test(text) || NOT_SEALED.test(text)) return false;
+  return c.type !== 'OTHER';
+}
+
+/**
+ * Read a category page (e.g. a shop's "Pokémon" section) and collect links to
+ * Pokémon products on it, following "next page" links up to `maxPages`.
+ */
+export async function crawlListingPage(startUrl: string, deadline: number, maxPages = 6, max = 400): Promise<string[]> {
+  const host = new URL(startUrl).hostname;
+  const found = new Set<string>();
+  const seen = new Set<string>();
+  let next: string | undefined = startUrl;
+
+  while (next && seen.size < maxPages && found.size < max && Date.now() < deadline) {
+    seen.add(next);
+    let html: string;
+    let finalUrl: string;
+    try {
+      ({ html, finalUrl } = await fetchHtml(next, { timeoutMs: 10_000, retries: 0 }));
+    } catch {
+      break;
+    }
+    const $ = cheerio.load(html);
+    $('a[href]').each((_, a) => {
+      let u: URL;
+      try {
+        u = new URL($(a).attr('href')!, finalUrl);
+      } catch {
+        return;
+      }
+      if (bareHost(u.hostname) !== bareHost(host)) return;
+      const text = `${$(a).attr('title') ?? ''} ${$(a).text()}`.replace(/\s+/g, ' ').trim();
+      if (!looksLikePokemonProductUrl(u.toString(), host) && !looksLikePokemonProductText(text, u)) return;
+      const resolved = resolveStore(u.toString());
+      if ('url' in resolved && resolved.url !== finalUrl && found.size < max) found.add(resolved.url);
+    });
+    const rel = $('link[rel="next"]').attr('href') || $('a[rel="next"]').attr('href');
+    next = rel ? new URL(rel, finalUrl).toString() : undefined;
+    if (next && seen.has(next)) next = undefined;
+    if (next) await sleep(1_000);
+  }
+  return [...found];
+}
+
+async function scanListingShop(shop: ShopRow, deadline: number) {
+  const urls = shop.collection ? await crawlListingPage(shop.collection, deadline) : [];
+  const added = await saveFoundUrls(urls);
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: {
+      lastScannedAt: new Date(),
+      nextScanAt: new Date(Date.now() + SITEMAP_RESCAN_EVERY),
+      productsFound: urls.length,
+      lastError: urls.length ? null : 'No Pokémon product links found on that page',
+    },
+  });
+  return { host: shop.host, found: urls.length, added, changed: 0, finished: true, error: undefined as string | undefined };
+}
+
+/** Queue found product links for checking, spread over the next 30 minutes so a site isn't hit all at once. */
+export async function saveFoundUrls(urls: string[]) {
   if (!urls.length) return 0;
   const now = Date.now();
   const { count } = await prisma.trackedUrl.createMany({
@@ -366,7 +444,7 @@ async function saveSitemapUrls(urls: string[]) {
 
 async function scanSitemapShop(shop: ShopRow, deadline: number) {
   const urls = await sitemapProductUrls(shop.host, deadline);
-  const added = await saveSitemapUrls(urls);
+  const added = await saveFoundUrls(urls);
   await prisma.shop.update({
     where: { id: shop.id },
     data: {
@@ -393,34 +471,62 @@ export async function runDueScans(budgetMs = 45_000) {
 }
 
 /**
- * Add a website (from a pasted homepage): a Shopify shop is scanned through
- * its catalogue JSON; any other site through its sitemap. Returns null if
- * neither finds anything readable.
+ * Add a website from a pasted link: a homepage (whole shop) or a Shopify
+ * collection page. Shopify shops are scanned through their catalogue JSON;
+ * any other site through its sitemap. Returns null if nothing readable.
  */
-export async function addShop(host: string) {
-  const firstPage = await probeShopify(host);
+export async function addShop(host: string, collection?: string) {
+  const existing = await prisma.shop.findUnique({ where: { host } });
+  if (existing?.enabled && !existing.collection && existing.platform === 'shopify' && collection) {
+    return { shop: existing, platform: 'shopify' as const, alreadyWhole: true };
+  }
+
+  const firstPage = await probeShopify(host, collection);
   if (firstPage) {
     const shop = await prisma.shop.upsert({
       where: { host },
-      update: { enabled: true, platform: 'shopify', nextScanAt: new Date(), scanPage: 1 },
-      create: { host, name: storeNameFromHost(host), platform: 'shopify' },
+      update: { enabled: true, platform: 'shopify', collection: collection ?? null, nextScanAt: new Date(), scanPage: 1, lastError: null },
+      create: { host, name: storeNameFromHost(host), platform: 'shopify', collection: collection ?? null },
     });
-    return { shop, platform: 'shopify' as const };
+    return { shop, platform: 'shopify' as const, alreadyWhole: false };
   }
+  if (collection) return null; // looked like a Shopify collection but isn't readable
 
   const urls = await sitemapProductUrls(host, Date.now() + 25_000);
   if (!urls.length) return null;
   const shop = await prisma.shop.upsert({
     where: { host },
-    update: { enabled: true, platform: 'sitemap' },
+    update: { enabled: true, platform: 'sitemap', collection: null, lastError: null },
     create: { host, name: storeNameFromHost(host), platform: 'sitemap' },
   });
-  await saveSitemapUrls(urls);
+  await saveFoundUrls(urls);
   await prisma.shop.update({
     where: { id: shop.id },
     data: { lastScannedAt: new Date(), nextScanAt: new Date(Date.now() + SITEMAP_RESCAN_EVERY), productsFound: urls.length },
   });
-  return { shop, platform: 'sitemap' as const, found: urls.length };
+  return { shop, platform: 'sitemap' as const, found: urls.length, alreadyWhole: false };
+}
+
+/** Add a category page (non-Shopify) as a source: collect its product links now and re-read it daily. */
+export async function addListingPage(url: string, deadline: number) {
+  const urls = await crawlListingPage(url, deadline);
+  if (urls.length < 2) return null;
+  const host = new URL(url).hostname;
+  const existing = await prisma.shop.findUnique({ where: { host } });
+  const shop =
+    existing?.enabled && !existing.collection
+      ? existing // already scanning the whole site; just add these links
+      : await prisma.shop.upsert({
+          where: { host },
+          update: { enabled: true, platform: 'listing', collection: url, lastError: null },
+          create: { host, name: storeNameFromHost(host), platform: 'listing', collection: url },
+        });
+  await saveFoundUrls(urls);
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: { lastScannedAt: new Date(), nextScanAt: new Date(Date.now() + SITEMAP_RESCAN_EVERY), productsFound: urls.length },
+  });
+  return { shop, found: urls.length };
 }
 
 export { scanShop };

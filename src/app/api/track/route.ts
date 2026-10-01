@@ -4,67 +4,102 @@ import { prisma } from '@/lib/db';
 import { resolveStore } from '@/lib/retailers';
 import { scrapeUrl } from '@/lib/scraper/scrape';
 import { applyResult } from '@/lib/scraper/run';
-import { addShop, scanShop } from '@/lib/scraper/catalog';
+import { addListingPage, addShop, scanShop } from '@/lib/scraper/catalog';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+type ShopReply = { kind: 'shop'; shop: string; site: string; found: number; finished: boolean; pending?: boolean; note?: string };
+
 /**
  * POST /api/track  { url: string }
- * - A product link: save it, check it straight away, then keep polling it.
- * - A website's homepage: add it to the sites Peek scans for Pokémon products
- *   (Shopify catalogue, or the site's sitemap) and do a first scan.
+ * - Product link → track it and check it straight away.
+ * - Homepage or Shopify collection (/collections/pokemon) → scan for every Pokémon product.
+ * - Any other category page (a link that isn't a single product) → collect the product links on it.
  */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { url?: unknown };
   if (typeof body.url !== 'string' || body.url.length > 2048) {
-    return NextResponse.json({ error: 'Send { "url": "<product link>" }.' }, { status: 400 });
+    return NextResponse.json({ error: 'Paste a link first.' }, { status: 400 });
   }
 
   const resolved = resolveStore(body.url);
   if ('error' in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
+  // ---- Whole shop or Shopify collection ----
   if ('shopHost' in resolved) {
-    const added = await addShop(resolved.shopHost);
+    // Earlier versions saved collection links as a single "product"; tidy those up.
+    if (resolved.collection) {
+      await prisma.trackedUrl.updateMany({
+        where: { url: `https://${resolved.shopHost}/collections/${resolved.collection}` },
+        data: { active: false },
+      });
+    }
+    const added = await addShop(resolved.shopHost, resolved.collection);
     if (!added) {
       return NextResponse.json(
         {
           error:
-            'Couldn’t find any Pokémon products on that site — it may block scanning or not list products in a sitemap. Paste a product link from it instead.',
+            'Couldn’t find any Pokémon products there — the site may block scanning or not list its products. Try pasting its Pokémon category page or a product link instead.',
         },
         { status: 400 },
       );
     }
-    if (added.platform === 'shopify') {
+    const reply: ShopReply = { kind: 'shop', shop: added.shop.name, site: added.shop.host, found: 0, finished: true };
+    if (added.alreadyWhole) {
+      reply.found = added.shop.productsFound;
+      reply.note = `Already scanning the whole of ${added.shop.name}, which includes that collection.`;
+    } else if (added.platform === 'shopify') {
       const scan = await scanShop(added.shop, Date.now() + 25_000);
-      revalidatePath('/');
-      return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: scan.found, finished: scan.finished });
+      reply.found = scan.found;
+      reply.finished = scan.finished;
+    } else {
+      reply.found = added.found ?? 0;
+      reply.finished = false;
+      reply.pending = true;
     }
     revalidatePath('/');
-    // Sitemap finds have no title/stock yet; they're checked over the next half hour.
-    return NextResponse.json({ kind: 'shop', shop: added.shop.name, found: added.found, finished: false, pending: true });
+    return NextResponse.json(reply);
   }
 
+  // ---- Product link (or a category page that turns out to list many products) ----
   const existing = await prisma.trackedUrl.findUnique({ where: { url: resolved.url } });
   if (existing) {
-    // Promote shop-scan finds to "tracked by you" so they're checked every few minutes.
+    // Promote scan finds / deleted items to "added by you" so they're checked every few minutes.
     if (!existing.active || existing.source === 'CATALOG') {
       await prisma.trackedUrl.update({
         where: { id: existing.id },
         data: { active: true, source: 'USER', nextCheckAt: new Date() },
       });
     }
+    revalidatePath('/');
     return NextResponse.json({ kind: 'product', created: false, listing: existing });
   }
 
   const item = await prisma.trackedUrl.create({
     data: { url: resolved.url, retailer: resolved.config.key, source: 'USER' },
   });
-
-  // Shorter timeout than the cron: someone is waiting on this request.
   const result = await scrapeUrl(item.url, resolved.config, { timeoutMs: 7_000, retries: 0 });
-  const { updated } = await applyResult(item, result);
 
+  // Not a single product (no price, no stock signal)? Maybe it's a category page — collect its products.
+  const notAProduct = !result.ok || (result.status === 'UNKNOWN' && !result.pricePence);
+  if (notAProduct) {
+    const listing = await addListingPage(item.url, Date.now() + 30_000);
+    if (listing) {
+      await prisma.trackedUrl.delete({ where: { id: item.id } });
+      revalidatePath('/');
+      return NextResponse.json({
+        kind: 'shop',
+        shop: listing.shop.name,
+        site: listing.shop.host,
+        found: listing.found,
+        finished: false,
+        pending: true,
+      } satisfies ShopReply);
+    }
+  }
+
+  const { updated } = await applyResult(item, result);
   revalidatePath('/');
   return NextResponse.json(
     { kind: 'product', created: true, listing: updated, firstCheck: { ok: result.ok, status: result.status, error: result.error } },

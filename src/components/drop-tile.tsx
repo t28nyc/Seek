@@ -1,4 +1,5 @@
 import { formatDay, formatPence, timeAgo } from '@/lib/format';
+import { DeleteButton } from './delete-button';
 
 export type DropTileData = {
   key: string;
@@ -12,6 +13,8 @@ export type DropTileData = {
   publishedAt?: Date | null;
   pricePence?: number | null;
   cta: string;
+  /** What to send to /api/delete for this tile (omit to hide the delete button). */
+  deleteBody?: Record<string, unknown>;
 };
 
 const LABEL_STYLE: Record<string, string> = {
@@ -22,16 +25,19 @@ const LABEL_STYLE: Record<string, string> = {
   'Pre-release': 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
   Event: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
   Release: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+  Restock: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+  'In store': 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
 };
 
 export function DropTile({ drop }: { drop: DropTileData }) {
   const upcoming = drop.releaseDate && drop.releaseDate.getTime() > Date.now() - 86_400_000;
   return (
+    <div className="relative">
     <a
       href={drop.href}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex gap-3 rounded-2xl border border-zinc-200 bg-white p-3 transition active:scale-[0.99] hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900"
+      className="group flex gap-3 rounded-2xl border border-zinc-200 bg-white p-3 pr-9 transition active:scale-[0.99] hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900"
     >
       <div className="size-20 shrink-0 overflow-hidden rounded-xl bg-zinc-100 sm:size-24 dark:bg-zinc-800">
         {drop.imageUrl ? (
@@ -62,5 +68,11 @@ export function DropTile({ drop }: { drop: DropTileData }) {
         </div>
       </div>
     </a>
+    {drop.deleteBody && (
+      <div className="absolute right-1 top-1">
+        <DeleteButton body={drop.deleteBody} confirmText={`Remove “${drop.title}”?`} />
+      </div>
+    )}
+    </div>
   );
 }

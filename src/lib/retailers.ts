@@ -129,7 +129,7 @@ export function isPublicHost(host: string): boolean {
 
 export type ResolvedUrl =
   | { config: StoreConfig; url: string }
-  | { shopHost: string } // a shop's homepage: scan its whole catalogue
+  | { shopHost: string; collection?: string } // a homepage (whole shop) or a Shopify /collections/<handle> page
   | { error: string };
 
 /** Validate and normalise a pasted link: a product page, or a shop homepage (→ scan the whole shop). */
@@ -155,6 +155,10 @@ export function resolveStore(raw: string): ResolvedUrl {
   }
   if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, '');
   if (u.pathname === '/' || u.pathname === '') return { shopHost: u.hostname };
+  // Shopify collection page (e.g. /collections/pokemon): scan everything in it.
+  const collection = u.pathname.match(/^\/collections\/([^/]+)$/);
+  if (collection && collection[1] !== 'all') return { shopHost: u.hostname, collection: decodeURIComponent(collection[1]) };
+  if (collection) return { shopHost: u.hostname };
 
   return { config, url: u.toString() };
 }
