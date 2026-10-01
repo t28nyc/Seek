@@ -1,7 +1,7 @@
 import type { StockStatus } from '@prisma/client';
 import type { RetailerConfig } from '../retailers';
 import { fetchHtml, FetchFailure, type FetchFailureKind } from './fetch';
-import { findRrpPence, parseProductPage, type Signal } from './parse';
+import { findRrpPence, parseProductPage, plausiblePrice, type PriceSource, type Signal } from './parse';
 
 export type ScrapeResult = {
   /** QUEUE / parsed status on success; UNKNOWN when the fetch failed. */
@@ -12,6 +12,7 @@ export type ScrapeResult = {
   pricePence?: number;
   wasPricePence?: number;
   rrpPence?: number;
+  priceSource?: PriceSource;
   httpStatus?: number;
   durationMs: number;
   error?: string;
@@ -51,9 +52,14 @@ async function tryShopify(url: string, timeoutMs: number): Promise<ScrapeResult 
     const data = JSON.parse(res.html) as ShopifyProduct;
     if (typeof data?.available !== 'boolean') return undefined;
 
+    // The variant in the link, else the default one Shopify shows first (in stock if possible).
+    // (data.price is the *cheapest* variant, which can be a different item, e.g. a single pack vs a box.)
     const variantId = u.searchParams.get('variant');
-    const variant = variantId ? data.variants?.find((v) => String(v.id) === variantId) : undefined;
-    const available = variant ? variant.available : data.available;
+    const variants = data.variants ?? [];
+    const variant = variantId
+      ? variants.find((v) => String(v.id) === variantId)
+      : (variants.find((v) => v.available) ?? variants[0]);
+    const available = variantId && variant ? variant.available : data.available;
     const price = variant?.price ?? data.price;
     const compare = variant?.compare_at_price ?? data.compare_at_price;
     const status: StockStatus = !available ? 'OUT_OF_STOCK' : /pre-?order/i.test(data.title ?? '') ? 'PREORDER' : 'IN_STOCK';
@@ -63,7 +69,8 @@ async function tryShopify(url: string, timeoutMs: number): Promise<ScrapeResult 
       ok: true,
       title: data.title,
       imageUrl: data.featured_image?.startsWith('//') ? `https:${data.featured_image}` : data.featured_image,
-      pricePence: Number.isInteger(price) && price! > 0 ? price : undefined,
+      pricePence: Number.isInteger(price) ? plausiblePrice(price) : undefined,
+      priceSource: 'product data' as const,
       wasPricePence: compare && price && compare > price ? compare : undefined,
       rrpPence: findRrpPence(data.description?.replace(/<[^>]+>/g, ' ')),
       httpStatus: res.httpStatus,

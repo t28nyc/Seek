@@ -10,10 +10,10 @@ import { FeedSources } from '@/components/feed-sources';
 import { getSettings, matchesAny } from '@/lib/settings';
 import { ADDED_BY_YOU } from '@/lib/drops/feeds';
 import { toTile } from '@/lib/drops/tiles';
-import { isNonUkPost } from '@/lib/uk';
+import { isUkPost } from '@/lib/uk';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'In store — Peek' };
+export const metadata: Metadata = { title: 'In store — Seek' };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -35,8 +35,9 @@ export default async function InStorePage({ searchParams }: { searchParams: Prom
         OR: [
           // In-store posts and links: anything upcoming, or posted recently
           { kind: 'in-store', OR: [{ releaseDate: { gte: today } }, { publishedAt: { gte: recent } }, { source: ADDED_BY_YOU }] },
-          // Any upcoming release date (sets reach shop shelves on release day)
-          { releaseDate: { gte: today } },
+          // News about an upcoming set release date (sets reach shop shelves on release day) —
+          // but not product drops/pre-orders, which belong on Product drops.
+          { kind: 'online', status: null, source: { not: ADDED_BY_YOU }, releaseDate: { gte: today }, title: { contains: 'releas', mode: 'insensitive' } },
         ],
       },
       orderBy: [{ releaseDate: { sort: 'asc', nulls: 'last' } }, { publishedAt: 'desc' }],
@@ -52,7 +53,7 @@ export default async function InStorePage({ searchParams }: { searchParams: Prom
   // Releases only: hide events, game nights, leagues… (word list in Settings). Links you added always show.
   const isFiltered = (title: string, source: string) => source !== ADDED_BY_YOU && matchesAny(title, settings.inStoreExclude);
   // UK only (posts saved before the UK filter existed are checked here too)
-  const ukItems = items.filter((i) => i.source === ADDED_BY_YOU || !isNonUkPost(`${i.title} ${i.summary ?? ''}`, settings.nonUkWords));
+  const ukItems = items.filter((i) => isUkPost(i, settings.nonUkWords, settings.requireUkMention));
   const filteredCount = ukItems.filter((i) => isFiltered(i.title, i.source)).length;
   const shown = showFiltered ? ukItems : ukItems.filter((i) => !isFiltered(i.title, i.source));
 
@@ -61,7 +62,7 @@ export default async function InStorePage({ searchParams }: { searchParams: Prom
       key: d.id,
       href: d.allocationUrl ?? '#',
       title: d.title,
-      source: d.retailer ? getRetailer(d.retailer).name : 'Peek',
+      source: d.retailer ? getRetailer(d.retailer).name : 'Seek',
       label: 'Allocation',
       releaseDate: d.releaseDate,
       cta: 'Sign up',

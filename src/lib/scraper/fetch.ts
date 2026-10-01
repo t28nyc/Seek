@@ -41,7 +41,7 @@ const MAX_REDIRECTS = 5;
 
 const HEADERS: Record<string, string> = {
   // Identify yourself. Set SCRAPER_USER_AGENT to something with a contact URL.
-  'User-Agent': process.env.SCRAPER_USER_AGENT ?? 'PeekStockChecker/0.1 (+https://example.com/peek-bot)',
+  'User-Agent': process.env.SCRAPER_USER_AGENT ?? 'SeekStockChecker/0.1 (+https://example.com/seek-bot)',
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-GB,en;q=0.9',
   'Cache-Control': 'no-cache',

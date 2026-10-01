@@ -44,7 +44,8 @@ enum ProductType {
 enum Language {
   EN
   JP
-  OTHER
+  OTHER // Korean, European languages, Thai…
+  ZH    // Chinese (simplified or traditional)
 }
 
 enum ListingSource {
@@ -74,6 +75,7 @@ model Product {
 model TrackedUrl {
   id            String        @id @default(cuid())
   url           String        @unique // normalised: https, no tracking params
+  host          String?       // shop's domain without "www." — for fast per-shop filters and counts
   retailer      Retailer?     // set for the built-in stores; null for any other shop
   source        ListingSource @default(USER)
   active        Boolean       @default(true)
@@ -90,6 +92,7 @@ model TrackedUrl {
   wasPricePence Int?
   onSale        Boolean       @default(false)
   rrpPence      Int?          // RRP printed on the shop's own page, if any
+  priceSource   String?       // where the price was read: "shop catalogue", "product data", "page meta", "page markup"
 
   // Scheduling
   priority      Int           @default(0) // >0 = hot item, shorter poll interval
@@ -105,6 +108,7 @@ model TrackedUrl {
   updatedAt     DateTime      @updatedAt
 
   @@index([active, nextCheckAt])
+  @@index([host, active])
   @@index([status])
   @@index([onSale])
 }

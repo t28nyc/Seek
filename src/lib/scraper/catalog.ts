@@ -16,7 +16,8 @@ import { getStoreConfig, resolveStore, storeNameFromHost } from '../retailers';
 import { categorize } from '../categorize';
 import { linkProducts } from '../products';
 import { fetchHtml } from './fetch';
-import { parsePricePence } from './parse';
+import { parsePricePence, plausiblePrice } from './parse';
+import { bareHost } from '../host';
 import { findRrpPence } from './parse';
 import { ukCheck } from '../uk';
 import { DEFAULT_SETTINGS, getSettings, isPriorityTitle, matchesAny, splitList, type GeneralSettings } from '../settings';
@@ -73,6 +74,8 @@ const stripHtml = (html?: string) => (html ?? '').replace(/<[^>]+>/g, ' ').repla
 type ScannedItem = {
   url: string;
   title: string;
+  /** Title plus any language found only in the shop's tags/type — used to group the product and detect its language. */
+  specTitle?: string;
   status: StockStatus;
   pricePence?: number;
   wasPricePence?: number;
@@ -82,23 +85,30 @@ type ScannedItem = {
 
 function toItem(host: string, p: ShopifyProduct): ScannedItem {
   const variants = p.variants ?? [];
-  const inStock = variants.filter((v) => v.available !== false && v.available !== undefined);
-  const pick = (inStock.length ? inStock : variants)
-    .map((v) => ({ price: parsePricePence(v.price), was: parsePricePence(v.compare_at_price ?? undefined) }))
-    .filter((v) => v.price)
-    .sort((a, b) => a.price! - b.price!)[0];
+  const inStock = variants.filter((v) => v.available === true);
+  // The default variant Shopify shows first (in stock if possible) — not the cheapest, which can be a
+  // different item (e.g. "single pack" in a product that's mostly sold as a box).
+  const chosen = inStock[0] ?? variants[0];
+  const price = plausiblePrice(parsePricePence(chosen?.price));
+  const was = plausiblePrice(parsePricePence(chosen?.compare_at_price ?? undefined));
+  const pick = price ? { price, was } : undefined;
   const tags = Array.isArray(p.tags) ? p.tags.join(' ') : (p.tags ?? '');
   const status: StockStatus = !inStock.length
     ? 'OUT_OF_STOCK'
     : /pre-?order/i.test(`${p.title} ${tags}`)
       ? 'PREORDER'
       : 'IN_STOCK';
+  // Language often appears only in tags or product type ("Japanese", "Chinese")
+  const langHint = `${tags} ${p.product_type ?? ''}`.match(
+    /\b(japanese|chinese|simplified chinese|traditional chinese|korean|german|french|spanish|italian|thai)\b/i,
+  )?.[1];
   return {
     url: `https://${host}/products/${p.handle}`,
     title: p.title,
+    specTitle: langHint && !new RegExp(langHint, 'i').test(p.title) ? `${p.title} (${langHint})` : undefined,
     status,
     pricePence: pick?.price,
-    wasPricePence: pick?.was && pick.price && pick.was > pick.price ? pick.was : undefined,
+    wasPricePence: pick?.was && pick.price && pick.was > pick.price && pick.was < pick.price * 4 ? pick.was : undefined,
     imageUrl: p.images?.[0]?.src,
     // Many shops write "RRP £54.99" in the product description
     rrpPence: findRrpPence(stripHtml(p.body_html)),
@@ -134,12 +144,14 @@ async function saveItems(items: ScannedItem[]) {
   const fresh = items.filter((i) => !byUrl.has(i.url));
   let added = 0;
   if (fresh.length) {
-    const products = await linkProducts(fresh.map((f) => f.title));
+    const products = await linkProducts(fresh.map((f) => f.specTitle ?? f.title));
     const res = await prisma.trackedUrl.createMany({
       data: fresh.map((f) => {
-        const product = products.get(f.title);
+        const product = products.get(f.specTitle ?? f.title);
         return {
           url: f.url,
+          host: bareHost(f.url),
+          priceSource: f.pricePence ? 'shop catalogue' : null,
           retailer: getStoreConfig(f.url).key,
           source: 'CATALOG' as const,
           title: f.title,
@@ -180,6 +192,7 @@ async function saveItems(items: ScannedItem[]) {
         data: {
           status: item.status,
           pricePence: item.pricePence ?? e.pricePence,
+          ...(item.pricePence ? { priceSource: 'shop catalogue' } : {}),
           wasPricePence: item.wasPricePence ?? null,
           onSale: !!item.wasPricePence,
           ...(item.rrpPence ? { rrpPence: item.rrpPence } : {}),
@@ -274,7 +287,6 @@ async function scanShopifyShop(shop: ShopRow, deadline: number) {
 // ---------- Sitemap scanning (any website) ----------
 
 const SKIP_SITEMAP = /(blog|post|page|categor|collection|tag|author|image|video|brand|news|article)/i;
-const bareHost = (h: string) => h.toLowerCase().replace(/^www\./, '');
 
 /** Does this URL's path look like a Pokémon TCG sealed product? (Sitemaps give URLs, not titles.) */
 export function looksLikePokemonProductUrl(loc: string, host: string): boolean {
@@ -420,6 +432,7 @@ export async function saveFoundUrls(urls: string[]) {
   const { count } = await prisma.trackedUrl.createMany({
     data: urls.map((url) => ({
       url,
+      host: bareHost(url),
       retailer: getStoreConfig(url).key,
       source: 'CATALOG' as const,
       nextCheckAt: new Date(now + Math.random() * 30 * MIN),

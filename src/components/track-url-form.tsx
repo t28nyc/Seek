@@ -14,8 +14,8 @@ const STATUS_TEXT: Record<string, string> = {
   QUEUE: 'queue is live',
   PREORDER: 'available to pre-order',
   COMING_SOON: 'coming soon',
-  OUT_OF_STOCK: 'out of stock — Peek will keep checking',
-  UNKNOWN: 'couldn’t read the stock yet — Peek will keep trying',
+  OUT_OF_STOCK: 'out of stock — Seek will keep checking',
+  UNKNOWN: 'couldn’t read the stock yet — Seek will keep trying',
 };
 
 const looksLikeWebsite = (s: string) => {
@@ -68,10 +68,10 @@ export function TrackUrlForm() {
           site: data.site,
           title: data.note ? data.note : `Found ${n} on ${data.shop}`,
           text: data.pending
-            ? 'Their prices and stock fill in over the next 30 minutes. Peek re-reads the site daily for new products.'
+            ? 'Their prices and stock fill in over the next 30 minutes. Seek re-reads the site daily for new products.'
             : data.finished
-              ? 'Prices and stock are in. Peek rescans the site about every 30 minutes.'
-              : 'More are being added over the next few minutes as Peek reads the rest of the site.',
+              ? 'Prices and stock are in. Seek rescans the site about every 30 minutes.'
+              : 'More are being added over the next few minutes as Seek reads the rest of the site.',
         });
       } else if (!data.created) {
         setResult({ kind: 'product', text: 'Already tracking that one — it’s now checked every few minutes.' });
@@ -135,7 +135,7 @@ export function TrackUrlForm() {
               <p className="font-semibold">{result.title}</p>
               <p className="text-xs opacity-80">{result.text}</p>
               <Link
-                href={`/?site=${encodeURIComponent(result.site)}`}
+                href={`/?site=${encodeURIComponent(result.site.replace(/^www\./, ''))}`}
                 className="mt-2 inline-block rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900"
               >
                 Show them →

@@ -1,6 +1,7 @@
 import type { StockStatus, TrackedUrl } from '@prisma/client';
 import { prisma } from '../db';
 import { getStoreConfig } from '../retailers';
+import { bareHost } from '../host';
 import { findOrCreateProduct } from '../products';
 import { DEFAULT_SETTINGS, getSettings, isPriorityTitle, type GeneralSettings } from '../settings';
 import { scrapeUrl, type ScrapeResult } from './scrape';
@@ -83,6 +84,8 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
         wasPricePence,
         onSale: !!(wasPricePence && pricePence && wasPricePence > pricePence),
         ...(r.ok && r.rrpPence ? { rrpPence: r.rrpPence } : {}),
+        ...(r.ok && r.pricePence ? { priceSource: r.priceSource ?? null } : {}),
+        ...(!item.host && { host: bareHost(item.url) }),
         title: item.title ?? r.title,
         imageUrl: item.imageUrl ?? r.imageUrl,
         productId,

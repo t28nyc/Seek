@@ -147,7 +147,7 @@ export function ShopsEditor({ shops }: { shops: ShopRowView[] }) {
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">
                     {s.products > 0 ? (
-                      <Link href={`/?site=${encodeURIComponent(s.host)}`} className="hover:underline">
+                      <Link href={`/?site=${encodeURIComponent(s.host.replace(/^www\./, ''))}`} className="hover:underline">
                         {s.products}
                       </Link>
                     ) : (
@@ -156,7 +156,7 @@ export function ShopsEditor({ shops }: { shops: ShopRowView[] }) {
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">
                     {s.inStock > 0 ? (
-                      <Link href={`/?site=${encodeURIComponent(s.host)}&status=in`} className="font-semibold text-emerald-600 hover:underline">
+                      <Link href={`/?site=${encodeURIComponent(s.host.replace(/^www\./, ''))}&status=in`} className="font-semibold text-emerald-600 hover:underline">
                         {s.inStock}
                       </Link>
                     ) : (

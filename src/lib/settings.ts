@@ -22,6 +22,7 @@ export type GeneralSettings = {
   dropsKeepDays: number;
   rrpForJapanese: boolean;
   nonUkWords: string;
+  requireUkMention: boolean;
 };
 
 const OLD_PRIORITY_DEFAULT = 'perfect order, nihil zero, paradox rift, prismatic evolutions, destined rivals';
@@ -50,7 +51,8 @@ export const DEFAULT_SETTINGS: GeneralSettings = {
   dropsKeepDays: 30,
   rrpForJapanese: false,
   nonUkWords:
-    'target, walmart, gamestop, best buy, costco wholesale, sams club, meijer, kroger, barnes noble, walgreens, cvs, dollar general, five below, usa, united states, canada, australia, eb games, jb hi fi',
+    'target, walmart, gamestop, best buy, costco wholesale, sams club, meijer, kroger, barnes noble, walgreens, cvs, dollar general, five below, usa, united states, us release, america, american, canada, australia, eb games, jb hi fi, kmart, big w, dollar tree, toys r us canada',
+  requireUkMention: true,
 };
 
 export const SETTING_LABELS: Record<keyof GeneralSettings, { label: string; help: string; unit?: string }> = {
@@ -67,6 +69,10 @@ export const SETTING_LABELS: Record<keyof GeneralSettings, { label: string; help
   inStoreExclude: { label: 'Hide from In store', help: 'In store shows releases only; items mentioning any of these are hidden. Comma-separated.' },
   dropsKeepDays: { label: 'Keep drops and news for', help: 'Older posts drop off the pages.', unit: 'days' },
   rrpForJapanese: { label: 'Use the RRP table for Japanese products', help: 'Off by default — Japanese products have different prices.' },
+  requireUkMention: {
+    label: 'Only keep web news that’s clearly about the UK',
+    help: 'On: news from web searches and global sites is kept only if it mentions the UK, £ or a UK shop, or comes from a UK website. UK sources (HotUKDeals, Poké Tracker, UK shops) are always kept.',
+  },
   nonUkWords: {
     label: 'Not-UK words',
     help: 'Drop and in-store posts mentioning these (or $/€ prices) are left out unless they also mention the UK or £. Comma-separated.',
@@ -145,8 +151,10 @@ async function recomputePriorities(keywords: string) {
   for (const phrase of splitList(keywords)) {
     const words = tokens(phrase);
     if (!words.length) continue;
+    // Titles can be written "Pokémon" or "Pokemon": match either spelling of each word.
+    const variants = (w: string) => [...new Set([w, w.replace(/pokemon/g, 'pokémon')])];
     await prisma.trackedUrl.updateMany({
-      where: { AND: words.map((w) => ({ title: { contains: w, mode: 'insensitive' as const } })) },
+      where: { AND: words.map((w) => ({ OR: variants(w).map((v) => ({ title: { contains: v, mode: 'insensitive' as const } })) })) },
       data: { priority: 1 },
     });
   }
@@ -195,16 +203,42 @@ export async function getRrpRules(includeDisabled = false) {
 
 export const bing = (q: string) => `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&mkt=en-GB`;
 
-export const DEFAULT_FEEDS: { name: string; url: string; kind: 'deal' | 'news'; page: 'online' | 'in-store' | 'auto' }[] = [
+/** UK high-street chains that sell Pokémon cards — used for In store searches and to spot in-store posts. */
+export const UK_STORES = [
+  'Tesco', 'Smyths', 'TG Jones', 'WHSmith', 'Morrisons', 'Asda', "Sainsbury's", 'Aldi', 'Lidl', 'Argos', 'GAME',
+  'The Entertainer', 'B&M', 'Home Bargains', 'The Range', 'Card Factory', 'Toys R Us', 'Hamleys', 'HMV', 'Forbidden Planet',
+  'Costco', 'Co-op', 'Iceland', 'Poundland', 'Wilko', 'John Lewis', "McDonald's",
+];
+
+type FeedDefault = { name: string; url: string; kind: 'deal' | 'news'; page: 'online' | 'in-store' | 'auto' };
+
+export const DEFAULT_FEEDS: FeedDefault[] = [
+  // UK deals forum — every Pokémon card post is UK and relevant
   { name: 'HotUKDeals', url: 'https://www.hotukdeals.com/rss/tag/pokemon', kind: 'deal', page: 'auto' },
+  // UK stock tracker's news section (a page of headlines, read like a feed)
+  { name: 'Poké Tracker (UK news)', url: 'https://poketracker.co.uk/pokestop', kind: 'news', page: 'auto' },
+  // TCG news (global — only posts that mention the UK are kept)
   { name: 'PokeBeach', url: 'https://www.pokebeach.com/feed', kind: 'news', page: 'auto' },
+  // Web news searches, UK edition
   { name: 'Web: pre-orders', url: bing('pokemon tcg pre-order uk'), kind: 'news', page: 'online' },
   { name: 'Web: restocks', url: bing('pokemon cards restock uk'), kind: 'news', page: 'online' },
   { name: 'Web: new sets', url: bing('pokemon tcg new set release date uk'), kind: 'news', page: 'auto' },
   { name: 'Web: Pokémon Center', url: bing('pokemon center uk pre-orders'), kind: 'news', page: 'online' },
-  { name: 'Web: in stores', url: bing('pokemon cards in stores uk'), kind: 'news', page: 'in-store' },
-  { name: 'Web: UK shops', url: bing('pokemon cards smyths OR argos OR tesco OR asda OR game'), kind: 'news', page: 'in-store' },
-  { name: 'Web: release day', url: bing('pokemon tcg release day shops uk'), kind: 'news', page: 'in-store' },
+  { name: 'Web: rumours & leaks', url: bing('pokemon cards uk rumour OR leak OR spotted'), kind: 'news', page: 'auto' },
+  // In store: one search per group of high-street chains, so each chain's news is found
+  { name: 'In store: Tesco', url: bing('pokemon cards tesco'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: Smyths', url: bing('pokemon cards smyths'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: TG Jones / WHSmith', url: bing('pokemon cards "tg jones" OR whsmith'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: Morrisons', url: bing('pokemon cards morrisons'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: Asda', url: bing('pokemon cards asda'), kind: 'deal', page: 'in-store' },
+  { name: "In store: Sainsbury's", url: bing("pokemon cards sainsbury's"), kind: 'deal', page: 'in-store' },
+  { name: 'In store: Aldi / Lidl', url: bing('pokemon cards aldi OR lidl'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: Argos', url: bing('pokemon cards argos'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: B&M / Home Bargains', url: bing('pokemon cards "b&m" OR "home bargains" OR "the range"'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: The Entertainer / GAME', url: bing('pokemon cards "the entertainer" OR "game stores"'), kind: 'deal', page: 'in-store' },
+  { name: 'In store: supermarkets', url: bing('pokemon cards supermarket uk'), kind: 'deal', page: 'in-store' },
+  { name: "In store: McDonald's", url: bing("pokemon cards mcdonald's happy meal uk"), kind: 'deal', page: 'in-store' },
+  { name: 'In store: release day', url: bing('pokemon tcg release day shops uk'), kind: 'news', page: 'in-store' },
 ];
 
 export async function getFeeds(includeDisabled = false) {
@@ -220,6 +254,18 @@ export async function getFeeds(includeDisabled = false) {
     ]) {
       await prisma.feedSource.updateMany({ where: { url: bing(from) }, data: { url: bing(to) } }).catch(() => null);
     }
+  });
+  // One-off: add the new UK in-store and rumour sources to existing lists (sources you removed aren't re-added
+  // because this only runs once; your other sources are untouched). The old combined searches are retired.
+  await seedOnce('migrated.feeds.instore2', async () => {
+    const existing = await prisma.feedSource.count();
+    await prisma.feedSource.deleteMany({
+      where: { url: { in: [bing('pokemon cards smyths OR argos OR tesco OR asda OR game'), bing('pokemon cards in stores uk')] } },
+    });
+    await prisma.feedSource.createMany({
+      data: DEFAULT_FEEDS.map((f, i) => ({ ...f, sortOrder: existing + i })),
+      skipDuplicates: true,
+    });
   });
   return prisma.feedSource.findMany({
     where: includeDisabled ? {} : { enabled: true },

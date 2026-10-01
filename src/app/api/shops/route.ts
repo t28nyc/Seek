@@ -1,4 +1,5 @@
 import { after, NextResponse } from 'next/server';
+import { bareHost } from '@/lib/host';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { isPublicHost, storeNameFromHost } from '@/lib/retailers';
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
         .catch(() => null);
       if (!shop) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
       await prisma.trackedUrl.updateMany({
-        where: { source: 'CATALOG', url: { startsWith: `https://${shop.host}/` } },
+        where: { source: 'CATALOG', host: bareHost(shop.host) },
         data: { active: false },
       });
       break;

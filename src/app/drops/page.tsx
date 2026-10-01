@@ -3,14 +3,14 @@ import { prisma } from '@/lib/db';
 import { ADDED_BY_YOU } from '@/lib/drops/feeds';
 import { toTile } from '@/lib/drops/tiles';
 import { getSettings } from '@/lib/settings';
-import { isNonUkPost } from '@/lib/uk';
+import { isUkPost } from '@/lib/uk';
 import { DatedGroups, dayHeading, groupBy, monthHeading } from '@/components/dated-groups';
 import { AddDropForm } from '@/components/add-drop-form';
 import { DeleteButton } from '@/components/delete-button';
 import { FeedSources } from '@/components/feed-sources';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Product drops — Peek' };
+export const metadata: Metadata = { title: 'Product drops — Seek' };
 
 /** Product drops: dated drops/pre-orders first (soonest first), then the latest posts by day. */
 export default async function DropsPage() {
@@ -38,7 +38,7 @@ export default async function DropsPage() {
   ]);
 
   // UK only (posts saved before the UK filter existed are checked here too)
-  const uk = (i: (typeof latest)[number]) => i.source === ADDED_BY_YOU || !isNonUkPost(`${i.title} ${i.summary ?? ''}`, settings.nonUkWords);
+  const uk = (i: (typeof latest)[number]) => isUkPost(i, settings.nonUkWords, settings.requireUkMention);
   const groups = [
     ...groupBy(
       upcoming.filter(uk).map((i) => toTile(i, 'online')),

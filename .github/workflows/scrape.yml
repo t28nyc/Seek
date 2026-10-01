@@ -2,7 +2,7 @@
 # day, so GitHub Actions pings the scrape endpoint instead.
 #
 # Repo → Settings → Secrets and variables → Actions:
-#   PEEK_URL     e.g. https://peek.vercel.app
+#   SEEK_URL     e.g. https://seek.vercel.app (PEEK_URL also works)
 #   CRON_SECRET  same value as in Vercel
 #
 # Every 5 minutes is the fastest schedule GitHub allows. Starting at :02 avoids
@@ -26,7 +26,8 @@ jobs:
     timeout-minutes: 5
     env:
       AUTH: "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
-      BASE: ${{ secrets.PEEK_URL }}
+      # SEEK_URL is the new name; PEEK_URL (the original name) still works.
+      BASE: ${{ secrets.SEEK_URL || secrets.PEEK_URL }}
     steps:
       # Each job decides for itself whether anything is due, so calling all
       # four every 5 minutes is cheap. One failing doesn't stop the others.

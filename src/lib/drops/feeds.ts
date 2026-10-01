@@ -3,7 +3,7 @@
  *
  * Sources are RSS feeds: a UK deals forum (HotUKDeals), TCG news (PokeBeach)
  * and Bing News searches — Bing publishes any news search as RSS, which is
- * how Peek "searches the web" without a paid search API. Posts about
+ * how Seek "searches the web" without a paid search API. Posts about
  * Pokémon TCG releases, pre-orders, restocks, events and deals are kept and
  * stored as DropItem tiles on the Product drops or In store page.
  */
@@ -12,7 +12,7 @@ import { prisma } from '../db';
 import { fetchHtml } from '../scraper/fetch';
 import { extractReleaseDate } from '../dates';
 import { extractDropDetails, type DropDetails } from './extract';
-import { isNonUkPost } from '../uk';
+import { isUkPost, isUkSource } from '../uk';
 import { isPublicHost } from '../retailers';
 import { getFeeds, getSettings } from '../settings';
 
@@ -29,13 +29,13 @@ export type Feed = {
 export { getFeeds } from '../settings';
 
 const TCG =
-  /\b(tcg|trading cards?|booster|elite trainer|etb|tins?|blister|bundle|collection box|premium collection|card game|pok[eé]mon cards?|sealed|expansion)\b/i;
+  /\b(tcg|trading cards?|booster|elite trainer|etb|tins?|blister|bundle|collection box|premium collection|card game|pok[eé]mon cards?|pok[eé]mon packs?|sealed|expansion)\b/i;
 const NOT_TCG = /\b(gift card|pok[eé]mon go|switch 2?|nintendo|t-shirt|hoodie|plush|lego|figure|video game|anime|movie|trailer)\b/i;
 const DROP_WORDS =
-  /\b(release[sd]?|releasing|release date|pre-?orders?|restock(ed)?|back in stock|launch(es|ed)?|coming|available|reveal(ed)?|announce[sd]?|drops?|allocation|raffle|ballot|queue|in stock|new set|expansion|where to buy|on sale|event|prerelease|pre-release|happy meal)\b/i;
-// Releases in physical shops (not events — those are filtered out of In store)
+  /\b(release[sd]?|releasing|release date|pre-?orders?|restock(ed|s)?|back in stock|launch(es|ed)?|coming|available|reveal(ed)?|announce[sd]?|drops?|allocation|raffle|ballot|queue|in stock|new set|expansion|where to buy|on sale|selling|sells|stocks?|shelves|spotted|rumou?r(s|ed)?|leak(s|ed)?|exclusive|cheap|bargain|price|happy meal)\b/i;
+// Releases in physical shops — UK high-street chains, supermarkets and wording about shelves
 const IN_STORE =
-  /\b(in[- ]?stores?|instore|on shelves|store release|street date|supermarkets?|smyths|argos|tesco|asda|sainsbury'?s|morrisons|aldi|lidl|w ?h ?smith|the entertainer|game stores?|happy meal|mcdonald'?s|high street)\b/i;
+  /\b(in[- ]?stores?|instore|on shelves|store release|street date|supermarkets?|high street|smyths|argos|tesco|asda|sainsbury'?s|morrisons|aldi|lidl|tg jones|w ?h ?smith|the entertainer|game stores?|b&m|home bargains|the range|card factory|toys r us|hamleys|poundland|co-?op|iceland|costco|happy meal|mcdonald'?s)\b/i;
 
 export function dropKind(title: string, summary: string, page: string = 'auto'): 'online' | 'in-store' {
   if (page === 'online' || page === 'in-store') return page;
@@ -115,6 +115,45 @@ export function parseFeed(xml: string): FeedPost[] {
   return posts;
 }
 
+/**
+ * A web page of headlines without a feed (e.g. a UK site's news section): links on the same site, under the
+ * page's own path, whose text reads like a headline. Dates come from nearby <time> tags when present.
+ */
+export function parseHeadlinePage(html: string, pageUrl: string): FeedPost[] {
+  const $ = cheerio.load(html);
+  const base = new URL(pageUrl);
+  const prefix = base.pathname.replace(/\/$/, '');
+  const seen = new Set<string>();
+  const posts: FeedPost[] = [];
+  $('a[href]').each((_, a) => {
+    let u: URL;
+    try {
+      u = new URL($(a).attr('href')!, pageUrl);
+    } catch {
+      return;
+    }
+    if (u.hostname !== base.hostname || !u.pathname.startsWith(`${prefix}/`) || u.pathname === `${prefix}/`) return;
+    const $a = $(a);
+    const title = ($a.find('h1, h2, h3, h4').first().text() || $a.attr('title') || $a.text()).replace(/\s+/g, ' ').trim();
+    if (title.length < 20 || title.length > 200) return;
+    const url = u.origin + u.pathname;
+    if (seen.has(url)) return;
+    seen.add(url);
+    const card = $a.closest('article, li, [class*="card" i], [class*="post" i]');
+    const dt = (card.length ? card : $a).find('time').first().attr('datetime') ?? card.find('time').first().text();
+    const date = dt ? new Date(dt) : undefined;
+    const img = (card.length ? card : $a).find('img').first().attr('src');
+    posts.push({
+      url,
+      title: title.slice(0, 300),
+      summary: (card.length ? card.text() : '').replace(/\s+/g, ' ').replace(title, '').trim().slice(0, 300),
+      imageUrl: img ? new URL(img, pageUrl).toString() : undefined,
+      publishedAt: date && !Number.isNaN(date.getTime()) ? date : new Date(),
+    });
+  });
+  return posts.slice(0, 40);
+}
+
 export type FeedResult = {
   feed: string;
   ok: boolean;
@@ -132,10 +171,15 @@ export async function refreshDrops(): Promise<FeedResult[]> {
   const results = await Promise.all(
     feeds.map(async (feed): Promise<FeedResult> => {
       try {
-        const { html } = await fetchHtml(feed.url, { timeoutMs: 10_000, retries: 1 });
-        // Pokémon TCG drops only, and UK only: posts about US/other shops or $/€ prices are left out.
-        const posts = parseFeed(html).filter(
-          (p) => isDropPost(p.title, p.summary, feed.kind) && !isNonUkPost(`${p.title} ${p.summary}`, settings.nonUkWords),
+        const { html, finalUrl } = await fetchHtml(feed.url, { timeoutMs: 10_000, retries: 1 });
+        // A feed (RSS/Atom), or a web page of headlines (e.g. a UK news section without a feed)
+        const parsed = /<(rss|feed|rdf:RDF)[\s>]/i.test(html.slice(0, 2_000)) ? parseFeed(html) : parseHeadlinePage(html, finalUrl);
+        const ukFeed = isUkSource(feed.url, feed.name);
+        // Pokémon TCG only, and UK only (see lib/uk.ts)
+        const posts = parsed.filter(
+          (p) =>
+            isDropPost(p.title, p.summary, feed.kind) &&
+            (ukFeed || isUkPost({ ...p, source: p.publisher }, settings.nonUkWords, settings.requireUkMention)),
         );
         const { count } = posts.length
           ? await prisma.dropItem.createMany({

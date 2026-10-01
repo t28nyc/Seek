@@ -6,9 +6,10 @@ import { GeneralSettingsForm, RrpTableEditor, SourcesEditor } from '@/components
 import { ShopsEditor } from '@/components/shops-editor';
 import { ensureStarterShops } from '@/lib/scraper/shops';
 import { timeAgo } from '@/lib/format';
+import { bareHost } from '@/lib/host';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Settings — Peek' };
+export const metadata: Metadata = { title: 'Settings — Seek' };
 
 const TABS = [
   { id: 'rrp', label: 'RRP table' },
@@ -82,7 +83,7 @@ async function SourcesTab() {
   return (
     <>
       <Intro>
-        Where Peek looks for product drops and in-store releases — checked every 30 minutes and on Refresh. Add an RSS feed
+        Where Seek looks for product drops and in-store releases — checked every 30 minutes and on Refresh. Add an RSS feed
         link, or just type search words to add a web search.
       </Intro>
       <SourcesEditor feeds={feeds.map((f) => ({ id: f.id, name: f.name, url: f.url, kind: f.kind, page: f.page, enabled: f.enabled }))} />
@@ -111,14 +112,14 @@ async function CheckingTab() {
 async function WebsitesTab() {
   await ensureStarterShops();
   const shops = await prisma.shop.findMany({ where: { status: { not: 'removed' } }, orderBy: [{ status: 'asc' }, { name: 'asc' }] });
-  const counts = await Promise.all(
-    shops.map((s) =>
-      Promise.all([
-        prisma.trackedUrl.count({ where: { active: true, url: { startsWith: `https://${s.host}/` } } }),
-        prisma.trackedUrl.count({ where: { active: true, status: 'IN_STOCK', url: { startsWith: `https://${s.host}/` } } }),
-      ]),
-    ),
-  );
+  // Two grouped queries for all shops (rather than two per shop).
+  const [all, inStock] = await Promise.all([
+    prisma.trackedUrl.groupBy({ by: ['host'], where: { active: true }, _count: { _all: true } }),
+    prisma.trackedUrl.groupBy({ by: ['host'], where: { active: true, status: 'IN_STOCK' }, _count: { _all: true } }),
+  ]);
+  const allBy = new Map(all.map((g) => [g.host, g._count._all]));
+  const stockBy = new Map(inStock.map((g) => [g.host, g._count._all]));
+  const counts = shops.map((s) => [allBy.get(bareHost(s.host)) ?? 0, stockBy.get(bareHost(s.host)) ?? 0]);
   const how: Record<string, string> = {
     shopify: 'Shopify catalogue',
     listing: 'category pages',
@@ -144,7 +145,7 @@ async function WebsitesTab() {
   return (
     <>
       <Intro>
-        UK shops Peek polls for Pokémon products. New shops are checked first: they must price in pounds and Peek must be able
+        UK shops Seek polls for Pokémon products. New shops are checked first: they must price in pounds and Seek must be able
         to read their products (respecting each site’s robots.txt). The list starts with shops from UK buying guides; “Find
         more UK shops” searches the web for others, and it runs automatically once a week.
       </Intro>

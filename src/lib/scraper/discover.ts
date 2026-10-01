@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { RETAILERS, resolveStore, type RetailerConfig } from '../retailers';
 import { categorize } from '../categorize';
 import { fetchHtml } from './fetch';
+import { bareHost } from '../host';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,7 +47,7 @@ export async function discoverRetailer(cfg: RetailerConfig) {
   const urls = [...found];
   const { count } = urls.length
     ? await prisma.trackedUrl.createMany({
-        data: urls.map((url) => ({ url, retailer: cfg.key, source: 'SEED' as const })),
+        data: urls.map((url) => ({ url, host: bareHost(url), retailer: cfg.key, source: 'SEED' as const })),
         skipDuplicates: true, // already-tracked URLs are left alone
       })
     : { count: 0 };

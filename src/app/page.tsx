@@ -4,7 +4,11 @@ import { prisma } from '@/lib/db';
 import { storeNameFromHost } from '@/lib/retailers';
 import { rrpForListings } from '@/lib/rrp';
 import { timeAgo } from '@/lib/format';
+import { bareHost } from '@/lib/host';
+import { SiteSelect } from '@/components/site-select';
 import {
+  LANGUAGES,
+  type LangKey,
   baseWhere,
   filtersHref,
   listWhere,
@@ -41,7 +45,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
   const f = readFilters(await searchParams);
   const where = listWhere(f);
 
-  const [listings, total, byStatus, shops, mineUrls] = await Promise.all([
+  const [listings, total, byStatus, shops, byHost] = await Promise.all([
     prisma.trackedUrl.findMany({
       where,
       include: { product: true },
@@ -52,7 +56,8 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
     prisma.trackedUrl.count({ where }),
     prisma.trackedUrl.groupBy({ by: ['status'], where: baseWhere(f), _count: { _all: true } }),
     prisma.shop.findMany({ where: { enabled: true, status: 'active' }, orderBy: { name: 'asc' } }),
-    prisma.trackedUrl.findMany({ where: { active: true, source: 'USER' }, select: { url: true }, take: 500 }),
+    // Products per shop (one grouped query) — for the shop picker
+    prisma.trackedUrl.groupBy({ by: ['host'], where: { active: true }, _count: { _all: true } }),
   ]);
   const rrps = await rrpForListings(listings);
 
@@ -61,15 +66,17 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
     return byStatus.filter((g) => !s || s.includes(g.status)).reduce((n, g) => n + g._count._all, 0);
   };
 
-  // Sites to filter by: scanned websites plus any site you've pasted links from.
-  const sites = new Map<string, string>(shops.map((s) => [s.host, s.name]));
-  for (const { url } of mineUrls) {
-    const host = new URL(url).hostname;
-    if (!sites.has(host)) sites.set(host, storeNameFromHost(host));
-  }
+  // Shops to filter by: every shop that has products, biggest first.
+  const shopNames = new Map(shops.map((s) => [bareHost(s.host), s.name]));
+  const sites = new Map<string, string>(
+    byHost
+      .filter((g) => g.host)
+      .sort((a, b) => b._count._all - a._count._all)
+      .map((g) => [g.host!, `${shopNames.get(g.host!) ?? storeNameFromHost(g.host!)} (${g._count._all})`]),
+  );
   const now = Date.now();
-  const filtered = f.q || f.site || f.mine || f.status !== 'all';
-  const siteName = f.site ? (sites.get(f.site) ?? storeNameFromHost(f.site)) : null;
+  const filtered = f.q || f.site || f.lang || f.mine || f.status !== 'all';
+  const siteName = f.site ? (shopNames.get(f.site) ?? storeNameFromHost(f.site)) : null;
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 px-3 py-4 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-6">
@@ -86,7 +93,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
         <details className="group rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">
             <span>
-              UK shops Peek polls <span className="font-normal text-zinc-500">({shops.length})</span>
+              UK shops Seek polls <span className="font-normal text-zinc-500">({shops.length})</span>
               {shops.some((s) => s.nextScanAt.getTime() <= now || s.scanPage > 1) && (
                 <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-sky-600">
                   <span className="size-1.5 animate-pulse rounded-full bg-current" /> scanning
@@ -114,7 +121,7 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
               return (
                 <li key={s.id} className="flex items-center gap-3 px-4 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <Link href={filtersHref(f, { site: s.host, n: PAGE })} className="text-sm font-medium hover:underline">
+                    <Link href={filtersHref(f, { site: bareHost(s.host), n: PAGE })} className="text-sm font-medium hover:underline">
                       {s.name}
                     </Link>
                     <p className="truncate text-[11px] text-zinc-500">
@@ -152,22 +159,28 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
           </Chip>
         </div>
 
-        {sites.size > 1 && (
-          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none]">
-            <Chip to={filtersHref(f, { site: undefined, n: PAGE })} active={!f.site}>
-              All shops
+        <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none]">
+          <Chip to={filtersHref(f, { lang: undefined, n: PAGE })} active={!f.lang}>
+            Any language
+          </Chip>
+          {(Object.keys(LANGUAGES) as LangKey[]).map((k) => (
+            <Chip key={k} to={filtersHref(f, { lang: f.lang === k ? undefined : k, n: PAGE })} active={f.lang === k}>
+              {LANGUAGES[k]}
             </Chip>
-            {[...sites].map(([host, name]) => (
-              <Chip key={host} to={filtersHref(f, { site: f.site === host ? undefined : host, n: PAGE })} active={f.site === host}>
-                {name}
-              </Chip>
-            ))}
-          </div>
-        )}
+          ))}
+          {sites.size > 1 && (
+            <SiteSelect
+              value={f.site}
+              options={[...sites].map(([host, label]) => ({ host, label }))}
+              hrefFor={Object.fromEntries([['', filtersHref(f, { site: undefined, n: PAGE })], ...[...sites.keys()].map((h) => [h, filtersHref(f, { site: h, n: PAGE })])])}
+            />
+          )}
+        </div>
 
         <form action="/" role="search" className="flex">
           {f.status !== 'all' && <input type="hidden" name="status" value={f.status} />}
           {f.site && <input type="hidden" name="site" value={f.site} />}
+          {f.lang && <input type="hidden" name="lang" value={f.lang} />}
           {f.mine && <input type="hidden" name="mine" value="1" />}
           <input
             type="search"
@@ -194,12 +207,13 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
                 filters: {
                   status: f.status,
                   ...(f.site && { site: f.site }),
+                  ...(f.lang && { lang: f.lang }),
                   ...(f.mine && { mine: '1' }),
                   ...(f.q && { q: f.q }),
                 },
               }}
               confirmText={
-                f.site && !f.q && !f.mine && f.status === 'all'
+                f.site && !f.q && !f.mine && !f.lang && f.status === 'all'
                   ? `Delete all ${total} products from ${siteName} and stop scanning it? This can’t be undone.`
                   : `Delete ${filtered ? 'these' : 'all'} ${total} product${total === 1 ? '' : 's'}? This can’t be undone.`
               }

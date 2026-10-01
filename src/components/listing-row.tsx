@@ -81,13 +81,14 @@ export function ListingRow({
           </div>
         </div>
 
-        <DeleteButton body={{ target: 'listing', id: listing.id }} confirmText={`Remove “${title}” from Peek?`} />
+        <DeleteButton body={{ target: 'listing', id: listing.id }} confirmText={`Remove “${title}” from Seek?`} />
       </div>
 
       <div className="sm:w-72 sm:shrink-0">
         <PriceStrip
           productId={listing.productId}
           pricePence={listing.pricePence}
+          priceSource={listing.priceSource}
           wasPricePence={listing.onSale ? listing.wasPricePence : null}
           rrp={rrp}
         />

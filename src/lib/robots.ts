@@ -1,5 +1,5 @@
 /**
- * robots.txt support: Peek doesn't fetch pages a site asks bots not to.
+ * robots.txt support: Seek doesn't fetch pages a site asks bots not to.
  * Rules are fetched once per site per server instance and cached for 6 hours.
  */
 
@@ -7,7 +7,7 @@ type Rules = { allow: string[]; disallow: string[]; at: number };
 const cache = new Map<string, Rules>();
 const TTL = 6 * 3_600_000;
 
-function parse(txt: string, agent = 'peek'): Pick<Rules, 'allow' | 'disallow'> {
+function parse(txt: string, agent = 'seek'): Pick<Rules, 'allow' | 'disallow'> {
   // Collect rules from groups for our agent, falling back to "*".
   const groups: { agents: string[]; allow: string[]; disallow: string[] }[] = [];
   let current: (typeof groups)[number] | null = null;
@@ -54,7 +54,7 @@ export function isAllowed(rules: Pick<Rules, 'allow' | 'disallow'>, pathAndQuery
 
 export { parse as parseRobots };
 
-/** May Peek fetch this URL? Unreachable or missing robots.txt means yes. */
+/** May Seek fetch this URL? Unreachable or missing robots.txt means yes. */
 export async function robotsAllows(url: string, userAgent: string): Promise<boolean> {
   const u = new URL(url);
   if (u.pathname === '/robots.txt') return true;

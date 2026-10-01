@@ -18,9 +18,12 @@ export function PriceStrip({
   wasPricePence,
   rrp,
   typical,
+  priceSource,
 }: {
   productId: string | null;
   pricePence: number | null;
+  /** Where the price was read from — shown on hover. */
+  priceSource?: string | null;
   wasPricePence?: number | null;
   rrp: RrpView;
   typical?: [number, number] | null;
@@ -91,6 +94,8 @@ export function PriceStrip({
   }
 
   const diff = rrp && pricePence != null ? pricePence - rrp.pence : null;
+  // Far below or far above the RRP usually means the wrong figure was read (or a different item/bundle).
+  const doubtful = !!rrp && pricePence != null && (pricePence < rrp.pence * 0.35 || pricePence > rrp.pence * 4);
   const pct = diff != null && rrp ? (diff / rrp.pence) * 100 : null;
   const tone =
     diff == null || Math.abs(diff) < 1
@@ -110,9 +115,21 @@ export function PriceStrip({
 
   return (
     <div className="grid grid-cols-3 overflow-hidden rounded-lg bg-zinc-100 text-center dark:bg-zinc-800/70">
-      <div className="flex flex-col px-1.5 py-1">
+      <div
+        className="flex flex-col px-1.5 py-1"
+        title={
+          doubtful
+            ? `This price looks unusual next to the RRP — check it on the shop’s page.${priceSource ? ` (Read from: ${priceSource})` : ''}`
+            : priceSource
+              ? `Price read from: ${priceSource}`
+              : undefined
+        }
+      >
         <span className="text-[10px] uppercase tracking-wide text-zinc-500">Price</span>
-        <span className="text-sm font-bold tabular-nums">{pricePence != null ? fmt(pricePence) : '—'}</span>
+        <span className="text-sm font-bold tabular-nums">
+          {pricePence != null ? fmt(pricePence) : '—'}
+          {doubtful && <span className="ml-0.5 text-amber-600">⚠</span>}
+        </span>
         {wasPricePence && pricePence != null && wasPricePence > pricePence && (
           <span className="text-[10px] text-zinc-400 line-through tabular-nums">{fmt(wasPricePence)}</span>
         )}

@@ -26,6 +26,8 @@ export type ParsedPage = {
   wasPricePence?: number;
   /** RRP printed on the page ("RRP £54.99"), if any. */
   rrpPence?: number;
+  /** Where the price was read from (shown on hover so odd prices can be checked). */
+  priceSource?: PriceSource;
 };
 
 // Tie-break order: most cautious first.
@@ -54,11 +56,26 @@ export function availabilityToStatus(v: unknown): StockStatus | undefined {
 export function parsePricePence(v: unknown): number | undefined {
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? Math.round(v * 100) : undefined;
   if (typeof v !== 'string') return undefined;
-  const m = v.replace(/,/g, '').match(/(\d+(?:\.\d{1,2})?)/);
-  if (!m) return undefined;
-  const pence = Math.round(parseFloat(m[1]) * 100);
+  // If a £ sign is present, read the number right after it ("2 for £10" → £10, "Save £5 £44.99" → £5 is avoided below).
+  const pounds = [...v.matchAll(/£\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/g)].map((m) => m[1]);
+  let raw: string | undefined;
+  if (pounds.length) {
+    // "Was £54.99 Now £44.99" / "£54.99 £44.99": the last £ figure is normally the current price,
+    // unless the text marks the first as the current one.
+    raw = /\b(was|rrp|save|saving|off)\b/i.test(v) || pounds.length === 1 ? pounds[pounds.length - 1] : pounds[0];
+    if (/\bsave\b/i.test(v) && pounds.length === 1) return undefined; // "Save £5" alone isn't a price
+  } else {
+    const t = v.trim();
+    // European decimal comma ("49,99") vs thousands comma ("1,299.00")
+    raw = /^\d+,\d{2}$/.test(t) ? t.replace(',', '.') : t.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/)?.[0];
+  }
+  if (!raw) return undefined;
+  const pence = Math.round(parseFloat(raw.replace(/,/g, '')) * 100);
   return pence > 0 && pence < 10_000_000 ? pence : undefined;
 }
+
+/** A believable shop price for a Pokémon product: 50p to £10,000. */
+export const plausiblePrice = (p: number | undefined) => (p && p >= 50 && p <= 1_000_000 ? p : undefined);
 
 /**
  * Find an RRP written in text: "RRP £54.99", "RRP: £54.99", "MSRP £55", "SRP £49.99",
@@ -112,10 +129,28 @@ function asArray<T>(v: T | T[] | undefined | null): T[] {
   return v == null ? [] : Array.isArray(v) ? v : [v];
 }
 
-function readJsonLd($: CheerioAPI) {
+const norm = (s: unknown) => (typeof s === 'string' ? s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() : '');
+
+function readJsonLd($: CheerioAPI, pageUrl: string, pageTitle: string) {
   const nodes = jsonLdNodes($);
-  const product = nodes.find((n) => hasType(n, 'Product')) ?? nodes.find((n) => hasType(n, 'ProductGroup'));
-  if (!product) return undefined;
+  const products = nodes.filter((n) => hasType(n, 'Product') || hasType(n, 'ProductGroup'));
+  if (!products.length) return undefined;
+  // Pages can include related products too: prefer the one whose url or name matches this page.
+  const path = (() => {
+    try {
+      return new URL(pageUrl).pathname.replace(/\/$/, '');
+    } catch {
+      return '';
+    }
+  })();
+  const title = norm(pageTitle);
+  const product =
+    products.find((n) => {
+      const u = typeof n.url === 'string' ? n.url : typeof n['@id'] === 'string' ? (n['@id'] as string) : '';
+      return !!path && u.split('#')[0].split('?')[0].replace(/\/$/, '').endsWith(path);
+    }) ??
+    products.find((n) => title && norm(n.name) && (title.includes(norm(n.name)) || norm(n.name).includes(title))) ??
+    products[0];
 
   // Flatten offers: Offer | Offer[] | AggregateOffer{offers} | ProductGroup.hasVariant[].offers
   const offers: LdNode[] = [];
@@ -129,20 +164,24 @@ function readJsonLd($: CheerioAPI) {
   addOffers(product.offers);
   for (const v of asArray(product.hasVariant as LdNode[])) addOffers(v?.offers);
 
-  const gbpOnly = offers.filter((o) => !o.priceCurrency || o.priceCurrency === 'GBP');
-  const gbp = gbpOnly.length ? gbpOnly : offers;
+  // UK only: offers priced in another currency are ignored entirely (never shown as £).
+  const gbp = offers.filter((o) => !o.priceCurrency || String(o.priceCurrency).toUpperCase() === 'GBP');
   const statuses = gbp.map((o) => availabilityToStatus(o.availability)).filter(Boolean) as StockStatus[];
   // Across variants/offers, report the most buyable state (in stock > pre-order > coming soon > OOS).
   const status = statuses.includes('IN_STOCK') ? 'IN_STOCK' : statuses.sort((a, b) => CAUTION.indexOf(b) - CAUTION.indexOf(a))[0];
 
-  const priced = gbp.find((o) => o.price ?? o.lowPrice);
+  // Price: the first in-stock offer (Shopify lists the default variant first), else the first priced offer.
+  const priced =
+    gbp.find((o) => (o.price ?? o.lowPrice) != null && availabilityToStatus(o.availability) === 'IN_STOCK') ??
+    gbp.find((o) => (o.price ?? o.lowPrice) != null);
   const image = asArray(product.image as unknown)[0];
 
   return {
     status,
     title: typeof product.name === 'string' ? product.name : undefined,
-    imageUrl: typeof image === 'string' ? image : (image as LdNode | undefined)?.url as string | undefined,
-    pricePence: parsePricePence(priced?.price ?? priced?.lowPrice),
+    imageUrl: typeof image === 'string' ? image : ((image as LdNode | undefined)?.url as string | undefined),
+    pricePence: plausiblePrice(parsePricePence(priced?.price ?? priced?.lowPrice)),
+    otherCurrency: offers.length > 0 && gbp.length === 0,
   };
 }
 
@@ -151,7 +190,7 @@ function readJsonLd($: CheerioAPI) {
 const TEXT_RULES: [RegExp, StockStatus][] = [
   [/\b(out of stock|sold out|currently unavailable|no longer available|not available online)\b/i, 'OUT_OF_STOCK'],
   [/\b(notify me|email me when|tell me when|register interest|back in stock alert)\b/i, 'OUT_OF_STOCK'],
-  [/\bcoming soon\b/i, 'COMING_SOON'],
+  [/\b(coming soon|pre-?orders? (?:open )?soon|available for pre-?order soon|not yet released)\b/i, 'COMING_SOON'],
   [/\bpre-?order\b/i, 'PREORDER'],
   [/\badd to (basket|cart|bag|trolley)\b|\bbuy now\b/i, 'IN_STOCK'],
 ];
@@ -230,7 +269,11 @@ function resolve(signals: Signal[]): StockStatus {
   if (!signals.length) return 'UNKNOWN';
   const score = new Map<StockStatus, number>();
   for (const s of signals) score.set(s.status, (score.get(s.status) ?? 0) + s.weight);
-  return [...score.entries()].sort((a, b) => b[1] - a[1] || CAUTION.indexOf(a[0]) - CAUTION.indexOf(b[0]))[0][0];
+  const best = [...score.entries()].sort((a, b) => b[1] - a[1] || CAUTION.indexOf(a[0]) - CAUTION.indexOf(b[0]))[0][0];
+  // "Out of stock" in the data but "Coming soon" on the page: not yet released. Both mean not buyable,
+  // so the more informative one wins.
+  if (best === 'OUT_OF_STOCK' && score.has('COMING_SOON')) return 'COMING_SOON';
+  return best;
 }
 
 function firstText($: CheerioAPI, sel?: string) {
@@ -250,57 +293,74 @@ function absolute(url: string | undefined, base: string) {
 
 // ---------- Entry point ----------
 
+const meta = ($: CheerioAPI, key: string) =>
+  ($(`meta[property="${key}"]`).attr('content') ?? $(`meta[name="${key}"]`).attr('content'))?.trim() || undefined;
+
+/** The main product area of a page, with other products' tiles (related, recently viewed…) removed. */
+function productScope($: CheerioAPI) {
+  const scope = SCOPE_SEL.slice(0, -1)
+    .map((s) => $(s).first())
+    .find((el) => el.length);
+  const el = (scope ?? $('body')).clone();
+  el.find(NOISE_SEL).remove();
+  return el;
+}
+
+export type PriceSource = 'selector' | 'product data' | 'page meta' | 'page markup';
+
 export function parseProductPage(html: string, cfg: Pick<RetailerConfig, 'selectors'>, pageUrl: string): ParsedPage {
   const $ = cheerio.load(html);
   const sel = cfg.selectors;
   const signals: Signal[] = [];
 
-  const ld = readJsonLd($);
+  const h1 = firstText($, 'h1') ?? '';
+  const ld = readJsonLd($, pageUrl, meta($, 'og:title') ?? h1);
   if (ld?.status) signals.push({ status: ld.status, source: 'json-ld', weight: 3 });
 
   const metaAvail =
-    $('meta[property="product:availability"]').attr('content') ??
-    $('meta[property="og:availability"]').attr('content') ??
+    meta($, 'product:availability') ??
+    meta($, 'og:availability') ??
     $('[itemprop="availability"]').attr('href') ??
     $('[itemprop="availability"]').attr('content');
   const metaStatus = availabilityToStatus(metaAvail?.replace(/\s+/g, ''));
   if (metaStatus) signals.push({ status: metaStatus, source: 'meta', weight: 2, detail: metaAvail });
 
   // Read price/title/image before textSignals() strips noise from the DOM.
-  const title =
-    firstText($, sel.title) ??
-    ld?.title ??
-    $('meta[property="og:title"]').attr('content')?.trim() ??
-    firstText($, 'h1') ??
-    firstText($, 'title');
+  const title = firstText($, sel.title) ?? ld?.title ?? meta($, 'og:title') ?? (h1 || undefined) ?? firstText($, 'title');
 
-  const pricePence =
-    parsePricePence(firstText($, sel.price)) ??
-    ld?.pricePence ??
-    parsePricePence($('meta[property="product:price:amount"]').attr('content')) ??
-    parsePricePence($('meta[property="og:price:amount"]').attr('content')) ??
-    parsePricePence($('[itemprop="price"]').first().attr('content') ?? firstText($, '[itemprop="price"]'));
+  // Price, most reliable source first. Every source must be in pounds and believable.
+  const scope = productScope($);
+  const metaCurrency = (meta($, 'product:price:currency') ?? meta($, 'og:price:currency'))?.toUpperCase();
+  const metaGbp = !metaCurrency || metaCurrency === 'GBP';
+  const twitterPrice = [1, 2].map((n) => (/price/i.test(meta($, `twitter:label${n}`) ?? '') ? meta($, `twitter:data${n}`) : undefined)).find(Boolean);
+  const microdata = scope.find('[itemprop="price"]').first();
+  const candidates: [PriceSource, number | undefined][] = [
+    ['selector', plausiblePrice(parsePricePence(firstText($, sel.price)))],
+    ['product data', ld?.pricePence],
+    ['page meta', metaGbp ? plausiblePrice(parsePricePence(meta($, 'product:price:amount') ?? meta($, 'og:price:amount'))) : undefined],
+    ['page meta', twitterPrice && /£/.test(twitterPrice) ? plausiblePrice(parsePricePence(twitterPrice)) : undefined],
+    ['page markup', plausiblePrice(parsePricePence(microdata.attr('content') ?? microdata.text()))],
+  ];
+  // A page whose structured data is priced in another currency never gets a scraped £ price.
+  const found = ld?.otherCurrency && !metaGbp ? undefined : candidates.find(([, p]) => p);
+  const pricePence = found?.[1];
 
   const wasText =
     firstText($, sel.wasPrice) ??
-    $('del, s, [class*="was-price" i], [class*="was_price" i], [class*="compare-at" i], [class*="rrp" i]')
+    scope
+      .find('del, s, [class*="was-price" i], [class*="was_price" i], [class*="compare-at" i], [class*="compare_at" i]')
       .filter((_, el) => /£\s?\d/.test($(el).text()))
       .first()
       .text();
-  const wasPence = parsePricePence(wasText);
+  const wasPence = plausiblePrice(parsePricePence(wasText));
 
   const imageUrl = absolute(
-    (sel.image && $(sel.image).first().attr('src')) || ld?.imageUrl || $('meta[property="og:image"]').attr('content'),
+    (sel.image && $(sel.image).first().attr('src')) || ld?.imageUrl || meta($, 'og:image'),
     pageUrl,
   );
 
   // Look for an RRP in the main product area only (not in other products' tiles).
-  const rrpPence = findRrpPence(
-    $('[itemtype*="schema.org/Product"], [class*="product-detail" i], [class*="product-info" i], [class*="pdp" i], main')
-      .first()
-      .text()
-      .replace(/\s+/g, ' ') || $('body').text().replace(/\s+/g, ' ').slice(0, 20_000),
-  );
+  const rrpPence = plausiblePrice(findRrpPence(scope.text().replace(/\s+/g, ' ').slice(0, 30_000)));
 
   signals.push(...textSignals($, sel));
 
@@ -310,7 +370,9 @@ export function parseProductPage(html: string, cfg: Pick<RetailerConfig, 'select
     title,
     imageUrl,
     pricePence,
-    wasPricePence: wasPence && pricePence && wasPence > pricePence ? wasPence : undefined,
+    priceSource: found?.[0],
+    // A "was" price only counts if it's above the current price and not absurdly so (a different product's price).
+    wasPricePence: wasPence && pricePence && wasPence > pricePence && wasPence < pricePence * 4 ? wasPence : undefined,
     rrpPence,
   };
 }

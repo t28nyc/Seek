@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bareHost } from '@/lib/host';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { listWhere, readFilters } from '@/lib/online-filters';
@@ -33,8 +34,8 @@ export async function POST(req: Request) {
       const f = readFilters(body.filters ?? {});
       count = (await prisma.trackedUrl.updateMany({ where: listWhere(f), data: { active: false } })).count;
       // Deleting everything from one website (no other filters) also stops scanning it.
-      if (f.site && f.status === 'all' && !f.q && !f.mine) {
-        await prisma.shop.updateMany({ where: { host: f.site }, data: { enabled: false } });
+      if (f.site && f.status === 'all' && !f.q && !f.mine && !f.lang) {
+        await prisma.shop.updateMany({ where: { host: { in: [f.site, `www.${f.site}`] } }, data: { enabled: false, status: 'removed' } });
       }
       break;
     }
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
       if (!shop) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
       count = (
         await prisma.trackedUrl.updateMany({
-          where: { source: 'CATALOG', url: { startsWith: `https://${shop.host}/` } },
+          where: { source: 'CATALOG', host: bareHost(shop.host) },
           data: { active: false },
         })
       ).count;

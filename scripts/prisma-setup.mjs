@@ -26,3 +26,9 @@ console.log(`Using database host ${new URL(resolved.DATABASE_URL_UNPOOLED).hostn
 
 execSync('prisma generate', { stdio: 'inherit', env });
 execSync('prisma db push --skip-generate', { stdio: 'inherit', env });
+// One-off data fixes that are safe to repeat (see prisma/backfill.sql). A failure here shouldn't block a deploy.
+try {
+  execSync('prisma db execute --file prisma/backfill.sql --schema prisma/schema.prisma', { stdio: 'inherit', env });
+} catch {
+  console.warn('Backfill step failed — continuing with the build.');
+}

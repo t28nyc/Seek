@@ -63,8 +63,13 @@ export const PRODUCT_TYPES: { type: ProductType; label: string; pattern: RegExp 
   { type: 'COLLECTION_BOX', label: 'Collection', pattern: /collection|\bbox\b/i },
 ];
 
+// Language editions. Chinese "Gem Packs" are a Chinese-only product line.
+const ZH_PATTERN = /chinese|simplified|traditional chinese|\b[st]-?chinese\b|\bchn\b|\(cn\)|\bcn\b|\bzh\b|gem pack/i;
 const JP_PATTERN = /japanese|\bjpn?\b|\bjapan\b|\(jp\)/i;
-const OTHER_LANG_PATTERN = /korean|chinese|simplified|traditional chinese|\bkr\b|\bthai\b/i;
+const OTHER_LANG_PATTERN =
+  /korean|\bkor\b|\bkr\b|\bthai\b|indonesian|german|deutsch|french|fran[cç]ais|spanish|espa[nñ]ol|italian|italiano|portuguese|dutch|polish/i;
+// Japanese-only set names (their cards come out in English under other names)
+const JP_ONLY_SETS = /nihil zero|ninja spinner|mega dream ex|mega brave|mega symphonia|inferno x|terastal festival|super electric breaker|battle partners|heat wave arena/i;
 const TCG_PATTERN = /pok[eé]mon|\btcg\b|trading card/i;
 
 export type Categorized = {
@@ -82,8 +87,10 @@ export function categorize(title: string): Categorized {
   const pt = PRODUCT_TYPES.find((t) => t.pattern.test(title));
 
   let language: Language = 'EN';
-  if (OTHER_LANG_PATTERN.test(title)) language = 'OTHER';
+  if (ZH_PATTERN.test(title)) language = 'ZH';
   else if (JP_PATTERN.test(title)) language = 'JP';
+  else if (OTHER_LANG_PATTERN.test(title)) language = 'OTHER';
+  else if (JP_ONLY_SETS.test(title) && !/\benglish\b/i.test(title)) language = 'JP';
   // A Japanese-only set name with no English name alongside it is the JP product.
   else if (exp?.jpLabel && new RegExp(exp.jpLabel, 'i').test(title) && !new RegExp(exp.label, 'i').test(title)) {
     language = 'JP';

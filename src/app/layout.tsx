@@ -5,7 +5,7 @@ import { SiteNav } from '@/components/site-nav';
 import { RefreshButton } from '@/components/refresh-button';
 
 export const metadata: Metadata = {
-  title: 'Peek — Pokémon TCG stock',
+  title: 'Seek — Pokémon TCG stock',
   description: 'Stock, prices vs RRP, in-store releases and product drops for Pokémon TCG.',
 };
 
@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="flex items-center justify-between sm:contents">
               <Link href="/" className="flex items-center gap-2 text-xl font-black tracking-tight">
                 <span className="inline-block size-6 rounded-full bg-[linear-gradient(to_bottom,#ef4444_50%,#fff_50%)] [box-shadow:inset_0_0_0_2px_#18181b]" />
-                Peek
+                Seek
               </Link>
               <div className="flex items-center gap-2 sm:order-last sm:ml-auto">
                 <RefreshButton />

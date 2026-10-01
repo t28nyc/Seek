@@ -29,7 +29,7 @@ export const RETAILERS: RetailerConfig[] = [
     name: 'Pokémon Center UK',
     hosts: ['www.pokemoncenter.com'],
     productPath: /^\/en-gb\/product\//,
-    discoveryUrls: [], // TODO: add the en-gb TCG category URL
+    discoveryUrls: [], // Pokémon Center blocks automated reading; paste product links instead
     minGapMs: 6_000,
     selectors: {},
     notes:
@@ -41,7 +41,7 @@ export const RETAILERS: RetailerConfig[] = [
     name: 'Smyths Toys',
     hosts: ['www.smythstoys.com'],
     productPath: /\/p\/\d+/,
-    discoveryUrls: [], // TODO: add the UK Pokémon trading cards category URL
+    discoveryUrls: [], // Smyths is read through its category page in the shop list (lib/scraper/shops.ts)
     minGapMs: 4_000,
     selectors: {},
   },

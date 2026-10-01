@@ -19,6 +19,8 @@ function slugify(s: string): string {
  * Anything else stays its own product, keyed by its title.
  * Pokémon Center exclusive ETBs get their own key.
  */
+const LANG_SUFFIX: Record<string, string> = { JP: ' (Japanese)', ZH: ' (Chinese)', OTHER: ' (other language)' };
+
 export function productSpec(title: string) {
   const c = categorize(title);
   const pcExclusive = /pok[eé]mon cent(er|re)/i.test(title) && c.type === 'ETB';
@@ -29,7 +31,7 @@ export function productSpec(title: string) {
     : `${c.language.toLowerCase()}-${slugify(title)}`;
 
   const name = grouped
-    ? `${c.expansionLabel} ${pcExclusive ? 'Pokémon Center ' : ''}${typeLabel(c.type)}${c.language === 'JP' ? ' (Japanese)' : ''}`
+    ? `${c.expansionLabel} ${pcExclusive ? 'Pokémon Center ' : ''}${typeLabel(c.type)}${LANG_SUFFIX[c.language] ?? ''}`
     : title;
 
   return { slug, name, expansion: c.expansion, type: c.type, language: c.language, hot: c.hot };

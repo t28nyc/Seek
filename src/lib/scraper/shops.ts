@@ -1,5 +1,5 @@
 /**
- * The list of UK shops Peek polls for Pokémon products (Settings → Websites).
+ * The list of UK shops Seek polls for Pokémon products (Settings → Websites).
  *
  * - A starter list of UK shops known to sell Pokémon TCG (from UK buying guides).
  * - Shops found on the web: links to shops in UK "where to buy" articles,
@@ -7,12 +7,13 @@
  * - Shops you add.
  *
  * Every new shop is checked before it's polled: it must price in pounds and
- * Peek must be able to read its products (Shopify catalogue, a Pokémon
+ * Seek must be able to read its products (Shopify catalogue, a Pokémon
  * category page, or its sitemap), within the site's robots.txt rules.
  */
 import * as cheerio from 'cheerio';
 import { prisma } from '../db';
 import { storeNameFromHost } from '../retailers';
+import { bareHost } from '../host';
 import { ukCheck } from '../uk';
 import { bing } from '../settings';
 import { fetchHtml } from './fetch';
@@ -72,7 +73,7 @@ export const STARTER_SHOPS: Starter[] = [
     name: 'Magic Madhouse',
     pages: ['https://magicmadhouse.co.uk/pokemon/pokemon-sealed-product/elite-trainer-boxes', 'https://magicmadhouse.co.uk/pokemon'],
   },
-  // High-street retailers (often block automated reading — Peek will say so)
+  // High-street retailers (often block automated reading — Seek will say so)
   {
     host: 'www.smythstoys.com',
     name: 'Smyths Toys',
@@ -93,6 +94,14 @@ const NOT_SHOPS =
   /(^|\.)(amazon\.|ebay\.|etsy\.|vinted\.|facebook\.|instagram\.|tiktok\.|twitter\.|x\.com|youtube\.|youtu\.be|reddit\.|wikipedia\.|pokemon\.com|bulbapedia|serebii|pokebeach|google\.|apple\.|bing\.|msn\.|bbc\.|which\.co\.uk|hotukdeals|cardmarket|tcgplayer|pricecharting|cardcollector\.co\.uk|poketracker|packratt|radiotimes|independent\.co\.uk|theguardian|dailymail|mirror\.co\.uk|express\.co\.uk|metro\.co\.uk|ign\.com|polygon|eurogamer|gamesradar|techradar|t3\.com|pcgamer|nintendolife|dexerto|thegamer|screenrant|gamerant|cbr\.com|vice\.com|mashable|forbes|businessinsider|trustpilot|linktr\.ee|discord)/i;
 
 export async function ensureStarterShops() {
+  // One-off: re-check shops without a .uk domain against the stricter UK rules.
+  const recheck = await prisma.setting.findUnique({ where: { key: 'migrated.shops.ukcheck2' } });
+  if (!recheck) {
+    const shops = await prisma.shop.findMany({ where: { status: 'active' }, select: { id: true, host: true } });
+    const ids = shops.filter((s) => !/\.uk$/i.test(s.host)).map((s) => s.id);
+    if (ids.length) await prisma.shop.updateMany({ where: { id: { in: ids } }, data: { status: 'checking' } });
+    await prisma.setting.upsert({ where: { key: 'migrated.shops.ukcheck2' }, update: {}, create: { key: 'migrated.shops.ukcheck2', value: 'true' } });
+  }
   const flag = await prisma.setting.findUnique({ where: { key: 'seeded.shops.v2' } });
   if (flag) return;
   await prisma.shop.createMany({
@@ -109,7 +118,7 @@ export async function ensureStarterShops() {
   await prisma.setting.create({ data: { key: 'seeded.shops.v2', value: 'true' } });
 }
 
-type ShopRow = { id: string; host: string; name: string; platform: string; collection: string | null };
+type ShopRow = { id: string; host: string; name: string; platform: string; collection: string | null; origin?: string };
 
 /**
  * Check a new shop: UK (prices in £) and readable. Picks how to read it:
@@ -117,22 +126,35 @@ type ShopRow = { id: string; host: string; name: string; platform: string; colle
  */
 export async function verifyShop(shop: ShopRow, deadline: number) {
   await loadScanSettings();
-  const fail = (status: 'not-uk' | 'unreadable', reason: string) =>
-    prisma.shop.update({ where: { id: shop.id }, data: { status, enabled: false, lastError: reason, lastScannedAt: new Date() } });
+  const fail = async (status: 'not-uk' | 'unreadable', reason: string) => {
+    await prisma.shop.update({ where: { id: shop.id }, data: { status, enabled: false, lastError: reason, lastScannedAt: new Date() } });
+    // Products already found there stop showing (links you added yourself stay)
+    if (status === 'not-uk') {
+      await prisma.trackedUrl.updateMany({ where: { host: bareHost(shop.host), source: 'CATALOG' }, data: { active: false } });
+    }
+  };
 
+  // UK only. Shops from the starter list (taken from UK buying guides) pass unless shown to be non-UK;
+  // shops found on the web or added by you must show they're UK (Shopify country, or UK details on the site).
   const uk = await ukCheck(shop.host);
-  if (uk.verdict === 'not-uk') {
-    await fail('not-uk', `Prices in ${uk.currency === 'OTHER' ? 'a non-UK currency' : uk.currency} — Peek is UK-only`);
+  if (uk.verdict === 'not-uk' || (uk.verdict === 'unknown' && shop.origin !== 'starter list')) {
+    await fail(
+      'not-uk',
+      uk.verdict === 'not-uk'
+        ? `${uk.why ?? 'Not a UK shop'} — Seek is UK-only`
+        : 'Couldn’t confirm it’s a UK shop (no UK address or Shopify country found)',
+    );
     return { host: shop.host, status: 'not-uk' };
   }
 
-  // 1. Shopify catalogue
-  const firstPage = await probeShopify(shop.host);
+  // 1. Shopify catalogue (keeping a collection you chose, e.g. just "pokemon")
+  const handle = shop.collection && !/^https?:/i.test(shop.collection) ? shop.collection : null;
+  const firstPage = await probeShopify(shop.host, handle);
   if (firstPage) {
-    const pokemon = firstPage.filter((p) => isPokemonSealed(p)).length;
+    const pokemon = firstPage.filter((p) => isPokemonSealed(p, !!handle && /pok/i.test(handle))).length;
     await prisma.shop.update({
       where: { id: shop.id },
-      data: { status: 'active', enabled: true, platform: 'shopify', collection: null, scanPage: 1, nextScanAt: new Date(), lastError: null },
+      data: { status: 'active', enabled: true, platform: 'shopify', collection: handle, scanPage: 1, nextScanAt: new Date(), lastError: null },
     });
     return { host: shop.host, status: 'active', how: 'shopify', pokemonOnFirstPage: pokemon };
   }
