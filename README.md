@@ -6,7 +6,7 @@ Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run
 
 ```
 peek/
-├── .github/workflows/scrape.yml   # free frequent scheduler → /api/cron/scrape every 30 min
+├── .github/workflows/scrape.yml   # free frequent scheduler → /api/cron/scrape every 5 min
 ├── prisma/schema.prisma           # Product, TrackedUrl, StockCheck, Drop
 ├── vercel.json                    # London region + two daily crons (Hobby limit)
 └── src/
@@ -71,7 +71,7 @@ Drops/allocation links are curated by hand: add rows to the `Drop` table from Ve
 Vercel Hobby only allows each cron to run **once per day**, and fires it at some point within the scheduled hour. Faster schedules fail the deploy. So:
 
 - `vercel.json` keeps two daily crons: discovery (04:30 UTC) and a scrape safety-net run (07:00 UTC).
-- The frequent scrape trigger is external: `.github/workflows/scrape.yml` (every 30 min) or a free service like cron-job.org (can go down to every few minutes). Both just send the same authorised GET.
+- The frequent scrape trigger is external: `.github/workflows/scrape.yml` (every 5 min, GitHub's minimum) or a free service like cron-job.org (can go down to every few minutes). Both just send the same authorised GET.
 - Polling frequency per URL is adaptive (`nextDelayMs` in `run.ts`), so a busy schedule doesn't mean every page is fetched every time.
 
 ## Before going live — things to fill in

@@ -25,24 +25,26 @@ export function nextDelayMs(o: {
     if (o.retryAfterSec) base = Math.max(base, o.retryAfterSec * 1000);
   } else {
     switch (o.status) {
+      // The scheduler fires every ~5 min, so 5 min is the effective floor.
       case 'QUEUE':
-        base = 10 * MIN;
+        base = 5 * MIN; // drop is live
         break;
       case 'IN_STOCK':
-        base = 20 * MIN;
+        base = 10 * MIN; // catch it selling out
         break;
       case 'OUT_OF_STOCK':
-        base = o.priority > 0 ? 15 * MIN : 60 * MIN;
+        base = o.priority > 0 ? 5 * MIN : 20 * MIN; // hot sets every run, the rest every ~20 min
         break;
       case 'PREORDER':
       case 'COMING_SOON':
-        base = 60 * MIN;
+        base = 30 * MIN;
         break;
       default:
-        base = 30 * MIN;
+        base = 10 * MIN;
     }
   }
-  return Math.round(base * (0.8 + Math.random() * 0.4)); // ±20% jitter so checks don't bunch up
+  // Up to 20% early/late so checks spread out; a slightly-early 5 min still lands on the next run.
+  return Math.round(base * (0.8 + Math.random() * 0.4));
 }
 
 /** Write a scrape result to the database. Shared by the cron and the "track" endpoint. */

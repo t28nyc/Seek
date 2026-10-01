@@ -5,14 +5,15 @@
 #   PEEK_URL     e.g. https://peek.vercel.app
 #   CRON_SECRET  same value as in Vercel
 #
-# Minutes: each run bills as 1 minute. Every 30 min ≈ 1,440 min/month, inside
-# the 2,000 free minutes for private repos (public repos are free). GitHub may
-# delay or skip scheduled runs under load — don't rely on exact timing.
+# Every 5 minutes is the fastest schedule GitHub allows. Starting at :02 avoids
+# the busy top of the hour, when GitHub delays or drops the most scheduled runs.
+# Actions minutes are free for public repos. A public repo's schedules are
+# paused after 60 days with no commits — re-enable from the Actions tab.
 name: scrape
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:
 
 concurrency:
