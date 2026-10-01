@@ -14,7 +14,7 @@ import type { CheerioAPI } from 'cheerio';
 import type { StockStatus } from '@prisma/client';
 import type { RetailerConfig } from '../retailers';
 
-export type SignalSource = 'json-ld' | 'selector' | 'meta' | 'text';
+export type SignalSource = 'shopify' | 'json-ld' | 'selector' | 'meta' | 'text';
 export type Signal = { status: StockStatus; source: SignalSource; weight: number; detail?: string };
 
 export type ParsedPage = {
@@ -115,7 +115,8 @@ function readJsonLd($: CheerioAPI) {
   addOffers(product.offers);
   for (const v of asArray(product.hasVariant as LdNode[])) addOffers(v?.offers);
 
-  const gbp = offers.filter((o) => !o.priceCurrency || o.priceCurrency === 'GBP');
+  const gbpOnly = offers.filter((o) => !o.priceCurrency || o.priceCurrency === 'GBP');
+  const gbp = gbpOnly.length ? gbpOnly : offers;
   const statuses = gbp.map((o) => availabilityToStatus(o.availability)).filter(Boolean) as StockStatus[];
   // Across variants/offers, report the most buyable state (in stock > pre-order > coming soon > OOS).
   const status = statuses.includes('IN_STOCK') ? 'IN_STOCK' : statuses.sort((a, b) => CAUTION.indexOf(b) - CAUTION.indexOf(a))[0];

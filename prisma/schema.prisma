@@ -68,11 +68,11 @@ model Product {
   @@index([expansion, type])
 }
 
-/// One product page at one retailer — the thing the scraper polls.
+/// One product page at any shop — the thing the scraper polls.
 model TrackedUrl {
   id            String        @id @default(cuid())
-  url           String        @unique // normalised: https, canonical host, no tracking params
-  retailer      Retailer
+  url           String        @unique // normalised: https, no tracking params
+  retailer      Retailer?     // set for the built-in stores; null for any other shop
   source        ListingSource @default(USER)
   active        Boolean       @default(true)
 

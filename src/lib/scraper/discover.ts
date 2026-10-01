@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { prisma } from '../db';
-import { RETAILERS, resolveRetailer, type RetailerConfig } from '../retailers';
+import { RETAILERS, resolveStore, type RetailerConfig } from '../retailers';
 import { categorize } from '../categorize';
 import { fetchHtml } from './fetch';
 
@@ -35,7 +35,7 @@ export async function discoverRetailer(cfg: RetailerConfig) {
           .join(' ');
         if (!categorize(label).looksLikeTcg) return;
 
-        const resolved = resolveRetailer(u.toString());
+        const resolved = resolveStore(u.toString());
         if ('url' in resolved) found.add(resolved.url);
       });
     } catch (e) {

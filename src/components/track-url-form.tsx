@@ -55,12 +55,12 @@ export function TrackUrlForm() {
     <form onSubmit={onSubmit} className="w-full">
       <div className="flex gap-2 rounded-2xl bg-white/10 p-1.5 ring-1 ring-white/15 focus-within:ring-white/40">
         <input
-          type="url"
+          type="text"
           inputMode="url"
           required
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste a product link from a UK store…"
+          placeholder="Paste any product link…"
           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-white placeholder:text-white/50 focus:outline-none"
         />
         <button

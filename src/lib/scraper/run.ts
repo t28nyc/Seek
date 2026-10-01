@@ -1,6 +1,6 @@
 import type { StockStatus, TrackedUrl } from '@prisma/client';
 import { prisma } from '../db';
-import { getRetailer } from '../retailers';
+import { getStoreConfig } from '../retailers';
 import { findOrCreateProduct } from '../products';
 import { scrapeUrl, type ScrapeResult } from './scrape';
 
@@ -111,7 +111,7 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
 }
 
 export async function checkOne(item: TrackedUrl) {
-  const r = await scrapeUrl(item.url, getRetailer(item.retailer));
+  const r = await scrapeUrl(item.url, getStoreConfig(item.url));
   const { statusChanged, previous } = await applyResult(item, r);
   // Hook for alerts: e.g. if (statusChanged && r.status === 'IN_STOCK') await notify(item)
   return { id: item.id, status: r.ok ? r.status : previous, changed: statusChanged, ok: r.ok, error: r.error };
@@ -121,8 +121,8 @@ export async function checkOne(item: TrackedUrl) {
  * Check every URL that is due, within a time budget that leaves headroom
  * under the function's maxDuration.
  *
- * - Different retailers run in parallel; requests to the same retailer run
- *   one at a time with a jittered gap (RetailerConfig.minGapMs).
+ * - Different shops run in parallel; requests to the same shop run one at a
+ *   time with a jittered gap (minGapMs; 3s for shops without a config).
  * - Each row is "leased" before it's fetched, so overlapping or duplicate
  *   cron invocations never scrape the same page twice.
  */
@@ -147,7 +147,7 @@ export async function runDueChecks({ budgetMs = 40_000, limit = 40 } = {}) {
     [...byHost.values()].map(async (items) => {
       for (const [i, item] of items.entries()) {
         if (outOfTime()) return;
-        if (i > 0) await sleep(getRetailer(item.retailer).minGapMs * (0.75 + Math.random() * 0.5));
+        if (i > 0) await sleep(getStoreConfig(item.url).minGapMs * (0.75 + Math.random() * 0.5));
         if (outOfTime()) return;
 
         const lease = await prisma.trackedUrl.updateMany({

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
-import { resolveRetailer } from '@/lib/retailers';
+import { resolveStore } from '@/lib/retailers';
 import { scrapeUrl } from '@/lib/scraper/scrape';
 import { applyResult } from '@/lib/scraper/run';
 
@@ -10,7 +10,7 @@ export const maxDuration = 30;
 
 /**
  * POST /api/track  { url: string }
- * Validates the URL against supported UK stores, saves it, does a first
+ * Validates any shop's product URL, saves it, does a first
  * check immediately so the user sees a result, then leaves it to the cron.
  */
 export async function POST(req: Request) {
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Send { "url": "<product link>" }.' }, { status: 400 });
   }
 
-  const resolved = resolveRetailer(body.url);
+  const resolved = resolveStore(body.url);
   if ('error' in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
   const existing = await prisma.trackedUrl.findUnique({ where: { url: resolved.url }, include: { product: true } });

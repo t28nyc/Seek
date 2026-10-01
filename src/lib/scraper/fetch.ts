@@ -5,7 +5,9 @@
  * "out of stock".
  */
 
-export type FetchFailureKind = 'timeout' | 'network' | 'http' | 'blocked' | 'queue' | 'too_large';
+import { isPublicHost } from '../retailers';
+
+export type FetchFailureKind = 'timeout' | 'network' | 'http' | 'blocked' | 'queue' | 'too_large' | 'unsafe';
 
 export class FetchFailure extends Error {
   constructor(
@@ -34,6 +36,7 @@ export type FetchOptions = {
 };
 
 const MAX_BYTES = 3_000_000;
+const MAX_REDIRECTS = 5;
 
 const HEADERS: Record<string, string> = {
   // Identify yourself. Set SCRAPER_USER_AGENT to something with a contact URL.
@@ -85,13 +88,22 @@ async function fetchOnce(url: string, timeoutMs: number): Promise<FetchResult> {
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
-      headers: HEADERS,
-      redirect: 'follow',
-      signal: ctrl.signal,
-      cache: 'no-store',
-    });
-    const finalUrl = res.url || url;
+    // Follow redirects by hand so every hop can be checked: a public link must
+    // never be able to bounce the scraper onto a private/internal address.
+    let current = url;
+    let res: Response | undefined;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (!isPublicHost(new URL(current).hostname)) {
+        throw new FetchFailure('unsafe', 'Refusing to fetch a non-public address');
+      }
+      res = await fetch(current, { headers: HEADERS, redirect: 'manual', signal: ctrl.signal, cache: 'no-store' });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+      if (!location) break;
+      current = new URL(location, current).toString();
+      if (hop === MAX_REDIRECTS) throw new FetchFailure('http', 'Too many redirects', res.status);
+    }
+    if (!res) throw new FetchFailure('network', 'No response');
+    const finalUrl = current;
 
     if (QUEUE_URL.test(new URL(finalUrl).hostname + new URL(finalUrl).pathname)) {
       throw new FetchFailure('queue', 'Redirected to a virtual queue', res.status);

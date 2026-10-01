@@ -74,13 +74,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               Peek
             </span>
             <span className="text-xs text-white/60">
-              {tracked} tracked · {inStock} buyable now · UK only
+              {tracked} tracked · {inStock} buyable now
             </span>
           </div>
           <div className="max-w-2xl">
             <h1 className="mb-1 text-2xl font-bold sm:text-3xl">What’s actually in stock.</h1>
             <p className="mb-4 text-sm text-white/60">
-              Pokémon TCG across Pokémon Center UK, Smyths, GAME, Magic Madhouse and Chaos Cards.
+              Paste a product link from any shop and Peek keeps checking whether it’s in stock.
             </p>
             <TrackUrlForm />
           </div>

@@ -1,4 +1,6 @@
-# Peek — UK Pokémon TCG stock finder
+# Peek — Pokémon TCG stock finder
+
+Paste a product link from **any** shop and Peek keeps checking whether it's in stock. Shopify shops (most independent card shops) are read from Shopify's product JSON, which is exact; everything else goes through the HTML Stock Status Engine. The five built-in UK stores also get daily discovery and store-specific tuning.
 
 Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run on Vercel's free (Hobby) plan.
 
@@ -25,7 +27,7 @@ peek/
     │   └── track-url-form.tsx     # the only client component
     └── lib/
         ├── db.ts                  # Prisma singleton
-        ├── retailers.ts           # per-store config, URL allowlist + normalisation
+        ├── retailers.ts           # built-in store configs, any-URL validation (blocks private addresses)
         ├── categorize.ts          # set / product-type / language detection
         ├── products.ts            # groups the same item across retailers
         ├── format.ts  cron-auth.ts

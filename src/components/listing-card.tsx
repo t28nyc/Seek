@@ -1,5 +1,5 @@
 import type { Product, TrackedUrl } from '@prisma/client';
-import { getRetailer } from '@/lib/retailers';
+import { getStoreConfig } from '@/lib/retailers';
 import { formatPence, timeAgo } from '@/lib/format';
 import { typeLabel } from '@/lib/categorize';
 import { StatusBadge } from './status-badge';
@@ -7,7 +7,7 @@ import { StatusBadge } from './status-badge';
 export type Listing = TrackedUrl & { product: Product | null };
 
 export function ListingCard({ listing }: { listing: Listing }) {
-  const retailer = getRetailer(listing.retailer);
+  const store = getStoreConfig(listing.url);
   const price = formatPence(listing.pricePence);
   const was = listing.onSale ? formatPence(listing.wasPricePence) : undefined;
   const pctOff =
@@ -51,7 +51,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
 
       <div className="flex flex-1 flex-col gap-2 p-4">
         <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-          <span className="truncate font-medium text-zinc-700 dark:text-zinc-300">{retailer.name}</span>
+          <span className="truncate font-medium text-zinc-700 dark:text-zinc-300">{store.name}</span>
           {listing.product && listing.product.type !== 'OTHER' && <span>{typeLabel(listing.product.type)}</span>}
         </div>
 

@@ -24,12 +24,62 @@ export type ScrapeResult = {
  * Never throws: every failure comes back as { ok: false, failure, error }
  * so a single bad page can't take down a cron batch.
  */
+type ShopifyVariant = { id: number; available: boolean; price: number; compare_at_price: number | null };
+type ShopifyProduct = {
+  title?: string;
+  available?: boolean;
+  price?: number; // pence
+  compare_at_price?: number | null;
+  featured_image?: string;
+  variants?: ShopifyVariant[];
+};
+
+/**
+ * Many independent UK card shops run on Shopify, which publishes every product
+ * as JSON at /products/<handle>.js with an exact `available` flag and prices in
+ * pence. That's far more reliable than reading buttons, so try it first for any
+ * /products/ URL. Returns undefined (fall back to HTML) if the shop isn't Shopify.
+ */
+async function tryShopify(url: string, timeoutMs: number): Promise<ScrapeResult | undefined> {
+  const u = new URL(url);
+  if (!/\/products\/[^/]+$/.test(u.pathname)) return undefined;
+  const started = Date.now();
+  try {
+    const res = await fetchHtml(`${u.origin}${u.pathname}.js`, { timeoutMs, retries: 0 });
+    const data = JSON.parse(res.html) as ShopifyProduct;
+    if (typeof data?.available !== 'boolean') return undefined;
+
+    const variantId = u.searchParams.get('variant');
+    const variant = variantId ? data.variants?.find((v) => String(v.id) === variantId) : undefined;
+    const available = variant ? variant.available : data.available;
+    const price = variant?.price ?? data.price;
+    const compare = variant?.compare_at_price ?? data.compare_at_price;
+    const status: StockStatus = !available ? 'OUT_OF_STOCK' : /pre-?order/i.test(data.title ?? '') ? 'PREORDER' : 'IN_STOCK';
+
+    return {
+      status,
+      ok: true,
+      title: data.title,
+      imageUrl: data.featured_image?.startsWith('//') ? `https:${data.featured_image}` : data.featured_image,
+      pricePence: Number.isInteger(price) && price! > 0 ? price : undefined,
+      wasPricePence: compare && price && compare > price ? compare : undefined,
+      httpStatus: res.httpStatus,
+      durationMs: Date.now() - started,
+      signals: [{ status, source: 'shopify', weight: 4 }],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function scrapeUrl(
   url: string,
   cfg: Pick<RetailerConfig, 'selectors'>,
   opts: { timeoutMs?: number; retries?: number } = {},
 ): Promise<ScrapeResult> {
   const started = Date.now();
+  const shopify = await tryShopify(url, Math.min(opts.timeoutMs ?? 8_000, 6_000));
+  if (shopify) return shopify;
   try {
     const page = await fetchHtml(url, { timeoutMs: opts.timeoutMs ?? 8_000, retries: opts.retries ?? 1 });
     const parsed = parseProductPage(page.html, cfg, page.finalUrl);
