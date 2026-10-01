@@ -1,19 +1,20 @@
-import { feedStatus, FEEDS } from '@/lib/drops/feeds';
+import Link from 'next/link';
+import { feedStatus, getFeeds } from '@/lib/drops/feeds';
 import { timeAgo } from '@/lib/format';
 
 /** Which web sources were checked, when, and what each found — so an empty page explains itself. */
 export async function FeedSources() {
-  const status = await feedStatus();
+  const [status, feeds] = await Promise.all([feedStatus(), getFeeds()]);
   return (
     <details className="rounded-2xl border border-zinc-200 bg-white text-sm dark:border-zinc-800 dark:bg-zinc-900">
       <summary className="cursor-pointer list-none px-4 py-3 font-semibold">
         Sources{' '}
         <span className="font-normal text-zinc-500">
-          ({FEEDS.length}) · {status ? `checked ${timeAgo(status.at)}` : 'not checked yet — tap Refresh'}
+          ({feeds.length}) · {status ? `checked ${timeAgo(status.at)}` : 'not checked yet — tap Refresh'}
         </span>
       </summary>
       <ul className="divide-y divide-zinc-100 border-t border-zinc-100 text-xs dark:divide-zinc-800 dark:border-zinc-800">
-        {FEEDS.map((f) => {
+        {feeds.map((f) => {
           const r = status?.results.find((x) => x.feed === f.name);
           return (
             <li key={f.name} className="flex items-center justify-between gap-3 px-4 py-2">
@@ -29,7 +30,10 @@ export async function FeedSources() {
         })}
       </ul>
       <p className="border-t border-zinc-100 px-4 py-2 text-[11px] text-zinc-500 dark:border-zinc-800">
-        Also included: events and pre-releases listed by the websites Peek scans, and links you add.
+        Plus links you add.{' '}
+        <Link href="/settings#sources" className="underline">
+          Add or remove sources in Settings
+        </Link>
       </p>
     </details>
   );

@@ -12,6 +12,7 @@ import { prisma } from '../db';
 import { fetchHtml } from '../scraper/fetch';
 import { extractReleaseDate, findAnyDate } from '../dates';
 import { isPublicHost } from '../retailers';
+import { getFeeds, getSettings } from '../settings';
 
 export type Feed = {
   name: string;
@@ -22,38 +23,24 @@ export type Feed = {
   page: 'online' | 'in-store' | 'auto';
 };
 
-const bing = (q: string) => `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&mkt=en-GB`;
-
-/** Add more feeds here. Any RSS or Atom URL works; failing feeds are skipped and shown as failing. */
-export const FEEDS: Feed[] = [
-  // UK deals forum: restocks and price drops posted by shoppers
-  { name: 'HotUKDeals', url: 'https://www.hotukdeals.com/rss/tag/pokemon', kind: 'deal', page: 'auto' },
-  // TCG news site: set announcements and release dates
-  { name: 'PokeBeach', url: 'https://www.pokebeach.com/feed', kind: 'news', page: 'auto' },
-  // Web news searches (UK edition)
-  { name: 'Web: pre-orders', url: bing('pokemon tcg pre-order'), kind: 'news', page: 'online' },
-  { name: 'Web: restocks', url: bing('pokemon cards restock uk'), kind: 'news', page: 'online' },
-  { name: 'Web: new sets', url: bing('pokemon tcg new set release date'), kind: 'news', page: 'auto' },
-  { name: 'Web: Pokémon Center', url: bing('pokemon center tcg pre-orders'), kind: 'news', page: 'online' },
-  { name: 'Web: in stores', url: bing('pokemon cards in stores uk'), kind: 'news', page: 'in-store' },
-  { name: 'Web: UK shops', url: bing('pokemon cards smyths OR argos OR tesco OR asda OR game'), kind: 'news', page: 'in-store' },
-  { name: 'Web: events', url: bing('pokemon tcg prerelease event'), kind: 'news', page: 'in-store' },
-];
+/** The list of sources lives in the database and is edited on the Settings page (defaults in lib/settings.ts). */
+export { getFeeds } from '../settings';
 
 const TCG =
   /\b(tcg|trading cards?|booster|elite trainer|etb|tins?|blister|bundle|collection box|premium collection|card game|pok[eé]mon cards?|sealed|expansion)\b/i;
 const NOT_TCG = /\b(gift card|pok[eé]mon go|switch 2?|nintendo|t-shirt|hoodie|plush|lego|figure|video game|anime|movie|trailer)\b/i;
 const DROP_WORDS =
   /\b(release[sd]?|releasing|release date|pre-?orders?|restock(ed)?|back in stock|launch(es|ed)?|coming|available|reveal(ed)?|announce[sd]?|drops?|allocation|raffle|ballot|queue|in stock|new set|expansion|where to buy|on sale|event|prerelease|pre-release|happy meal)\b/i;
+// Releases in physical shops (not events — those are filtered out of In store)
 const IN_STORE =
-  /\b(in[- ]?stores?|instore|pre-?release|local game stores?|LGS|store release|street date|supermarkets?|smyths|argos|tesco|asda|sainsbury'?s|morrisons|aldi|lidl|w ?h ?smith|the entertainer|game stores?|happy meal|mcdonald'?s|event|tournament|league)\b/i;
+  /\b(in[- ]?stores?|instore|on shelves|store release|street date|supermarkets?|smyths|argos|tesco|asda|sainsbury'?s|morrisons|aldi|lidl|w ?h ?smith|the entertainer|game stores?|happy meal|mcdonald'?s|high street)\b/i;
 
-export function dropKind(title: string, summary: string, page: Feed['page'] = 'auto'): 'online' | 'in-store' {
-  if (page !== 'auto') return page;
+export function dropKind(title: string, summary: string, page: string = 'auto'): 'online' | 'in-store' {
+  if (page === 'online' || page === 'in-store') return page;
   return IN_STORE.test(`${title} ${summary}`) ? 'in-store' : 'online';
 }
 
-export function isDropPost(title: string, summary: string, kind: Feed['kind']): boolean {
+export function isDropPost(title: string, summary: string, kind: string): boolean {
   if (!TCG.test(`${title} ${summary}`) || NOT_TCG.test(title)) return false;
   return kind === 'deal' || DROP_WORDS.test(title);
 }
@@ -130,8 +117,9 @@ export type FeedResult = { feed: string; ok: boolean; matched: number; added: nu
 
 /** Fetch every feed and store new posts. Records per-feed results so the pages can show what worked. */
 export async function refreshDrops(): Promise<FeedResult[]> {
+  const [feeds, settings] = await Promise.all([getFeeds(), getSettings()]);
   const results = await Promise.all(
-    FEEDS.map(async (feed): Promise<FeedResult> => {
+    feeds.map(async (feed): Promise<FeedResult> => {
       try {
         const { html } = await fetchHtml(feed.url, { timeoutMs: 10_000, retries: 1 });
         const posts = parseFeed(html).filter((p) => isDropPost(p.title, p.summary, feed.kind));
@@ -163,9 +151,9 @@ export async function refreshDrops(): Promise<FeedResult[]> {
     create: { name: 'drops-status', lastRunAt: new Date(), info: JSON.stringify(results) },
   });
 
-  // Keep the table small: remove feed posts older than 60 days whose date (if any) has passed.
-  // Links you added yourself and deleted posts are kept.
-  const cutoff = new Date(Date.now() - 60 * 86_400_000);
+  // Keep the table small: remove feed posts older than twice the "keep" setting whose date (if any)
+  // has passed. Links you added yourself and deleted posts are kept.
+  const cutoff = new Date(Date.now() - Math.max(settings.dropsKeepDays * 2, 14) * 86_400_000);
   await prisma.dropItem.deleteMany({
     where: {
       publishedAt: { lt: cutoff },

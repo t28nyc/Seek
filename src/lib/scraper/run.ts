@@ -2,6 +2,7 @@ import type { StockStatus, TrackedUrl } from '@prisma/client';
 import { prisma } from '../db';
 import { getStoreConfig } from '../retailers';
 import { findOrCreateProduct } from '../products';
+import { DEFAULT_SETTINGS, getSettings, isPriorityTitle, type GeneralSettings } from '../settings';
 import { scrapeUrl, type ScrapeResult } from './scrape';
 
 const MIN = 60_000;
@@ -19,7 +20,7 @@ export function nextDelayMs(o: {
   /** Items found by scanning a whole website are checked less often than links you added. */
   fromScan?: boolean;
   retryAfterSec?: number;
-}): number {
+}, settings: GeneralSettings = DEFAULT_SETTINGS): number {
   let base: number;
   if (!o.ok) {
     // Exponential backoff on failures/blocks: 30m, 1h, 2h, 4h, capped at 6h.
@@ -32,21 +33,21 @@ export function nextDelayMs(o: {
         base = 5 * MIN; // drop is live
         break;
       case 'IN_STOCK':
-        base = 10 * MIN; // catch it selling out
+        base = settings.checkInStockMin * MIN; // catch it selling out
         break;
       case 'OUT_OF_STOCK':
-        base = o.priority > 0 ? 5 * MIN : 20 * MIN; // hot sets every run, the rest every ~20 min
+        base = (o.priority > 0 ? settings.checkHotMin : settings.checkNormalMin) * MIN;
         break;
       case 'PREORDER':
       case 'COMING_SOON':
-        base = 30 * MIN;
+        base = Math.max(30, settings.checkNormalMin) * MIN;
         break;
       default:
-        base = 10 * MIN;
+        base = settings.checkInStockMin * MIN;
     }
   }
   // Up to 20% early/late so checks spread out; a slightly-early 5 min still lands on the next run.
-  if (o.fromScan && o.ok && o.priority <= 0) base = Math.max(base, o.status === 'IN_STOCK' ? 60 * MIN : 120 * MIN);
+  if (o.fromScan && o.ok && o.priority <= 0) base = Math.max(base, settings.checkScannedMin * MIN);
   return Math.round(base * (0.8 + Math.random() * 0.4));
 }
 
@@ -62,6 +63,7 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
   const statusChanged = status !== item.status;
   const priceChanged = pricePence !== item.pricePence;
 
+  const settings = await getSettings();
   let productId = item.productId;
   let priority = item.priority;
   if (!productId && r.title) {
@@ -69,6 +71,7 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
     productId = product.id;
     if (product.hot) priority = Math.max(priority, 1);
   }
+  if (priority <= 0 && isPriorityTitle(item.title ?? r.title, settings)) priority = 1;
 
   const [updated] = await prisma.$transaction([
     prisma.trackedUrl.update({
@@ -91,7 +94,10 @@ export async function applyResult(item: TrackedUrl, r: ScrapeResult) {
         // Stop polling pages that have disappeared.
         ...(r.httpStatus === 404 || r.httpStatus === 410 ? { active: false } : {}),
         nextCheckAt: new Date(
-          now.getTime() + nextDelayMs({ status, ok: r.ok, failCount, priority, fromScan: item.source === 'CATALOG', retryAfterSec: r.retryAfterSec }),
+          now.getTime() + nextDelayMs(
+            { status, ok: r.ok, failCount, priority, fromScan: item.source === 'CATALOG', retryAfterSec: r.retryAfterSec },
+            settings,
+          ),
         ),
       },
     }),

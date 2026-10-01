@@ -7,7 +7,7 @@ Next.js (App Router) + Tailwind + Prisma/Postgres (Neon) + cheerio, built to run
 ## Pages
 
 - **Online** (`/`) — everything Peek tracks, as compact rows. Each row shows **Price | RRP | vs RRP (£ and %)**. Filters: status chips with counts, "Added by me", shop chips, search; 50 rows at a time. Delete one row (×) or "Delete all"/"Delete these" (applies to the current filters; asks first). The "Websites Peek scans" panel shows each site's scan status and lets you remove a site.
-- **In store** (`/in-store`) — pre-release events and tournaments from scanned shops, news about Pokémon cards in high-street shops (supermarkets, Smyths, Argos, Happy Meals…), and upcoming set release days; grouped by month. "+ Add a link" to add one by hand.
+- **In store** (`/in-store`) — releases only: Pokémon cards in high-street shops (supermarkets, Smyths, Argos, Happy Meals…) and upcoming set release days, grouped by month. Events, game nights and tournaments are left out. "+ Add a link" to add one by hand.
 - **Product drops** (`/drops`) — pre-orders, restocks, new sets and deals from the web; upcoming release dates first, then newest posts by day. "+ Add a link" too.
 - **Refresh** (header) — starts a background check of your links, every website and every feed; the page updates itself over the next minute.
 
@@ -19,7 +19,16 @@ Deleting hides items rather than erasing them, so scans and feeds don't add them
 
 ## RRP
 
-Worked out automatically, in this order: set by you → "RRP £x" printed on any shop's page for that product → the Pokémon Center UK price → the most common "was" price across shops. Otherwise a typical range for the product type is shown as a hint (`lib/rrp.ts`). Tap the RRP on any row to set your own; it applies to that product at every shop.
+Worked out automatically, best source first: set by you → "RRP £x" (or MSRP / recommended retail price) printed on any shop's page or Shopify description for that product → the Pokémon Center UK price → the **RRP table** on the Settings page (matched on the product name) → the most common "was" price across shops. Tap the RRP on any row to set your own; it applies to that product at every shop. Every row shows Price | RRP | vs RRP (£ and %).
+
+## Settings (`/settings`, gear icon)
+
+- **RRP table** — add, edit, remove, turn off and reorder rows (first matching row wins), with a "try a product name" tester and reset to defaults.
+- **Drop & in-store sources** — add an RSS link or just search words (becomes a web search), choose which page it feeds, turn off, remove, reorder.
+- **Checking & keywords** — check intervals, priority keywords, words that leave products out of website scans, words that hide items from In store (it shows releases only), how long drops are kept, whether the RRP table applies to Japanese products.
+- **Websites** — the sites being scanned.
+
+Stored in the `Setting`, `RrpRule` and `FeedSource` tables; defaults in `lib/settings.ts`.
 
 ## Adding a whole website
 
@@ -29,7 +38,7 @@ Paste any of these into the box on the Online page:
 - **A Shopify collection** (e.g. `/collections/pokemon`) — just that collection.
 - **Any other category page** — the Pokémon product links on it (following "next page" links), re-read daily.
 
-Singles, accessories and merch are filtered out; event tickets go to the In store page.
+Singles, accessories, merch and event tickets are filtered out (word list on the Settings page).
 
 ## Scheduled jobs
 

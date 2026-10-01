@@ -21,11 +21,9 @@ function nameFromUrl(url: string) {
 export function ListingRow({
   listing,
   rrp,
-  typical,
 }: {
   listing: Listing;
   rrp: RrpView;
-  typical?: [number, number] | null;
 }) {
   const store = getStoreConfig(listing.url);
   const dim = listing.status === 'OUT_OF_STOCK';
@@ -92,7 +90,6 @@ export function ListingRow({
           pricePence={listing.pricePence}
           wasPricePence={listing.onSale ? listing.wasPricePence : null}
           rrp={rrp}
-          typical={typical}
         />
       </div>
     </li>

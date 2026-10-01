@@ -185,3 +185,34 @@ model JobRun {
   lastRunAt DateTime
   info      String?  // JSON summary of the last run, shown on the pages (e.g. which feeds worked)
 }
+
+/// RRP table (Settings page). The first enabled row whose keywords match a
+/// product title gives that product's RRP when no better source is found.
+model RrpRule {
+  id        String   @id @default(cuid())
+  name      String   // e.g. "Elite Trainer Box"
+  keywords  String   // comma-separated phrases; a phrase matches if all its words are in the title
+  rrpPence  Int      // RRP used for the price comparison
+  lowPence  Int?     // optional low end of the usual range, for reference
+  sortOrder Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+/// Web sources for Product drops and In store (Settings page).
+model FeedSource {
+  id        String   @id @default(cuid())
+  name      String
+  url       String   @unique
+  kind      String   @default("news")  // "news" (only release/stock posts) or "deal" (every TCG post)
+  page      String   @default("auto")  // "online" | "in-store" | "auto"
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+/// General settings (Settings page), stored as key → JSON value.
+model Setting {
+  key   String @id
+  value String
+}

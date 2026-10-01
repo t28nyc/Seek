@@ -1,24 +1,12 @@
-import type { ProductType } from '@prisma/client';
 import { prisma } from './db';
 import { getStoreConfig } from './retailers';
+import { getRrpRules, getSettings, matchRrpRule } from './settings';
 
 export type Rrp = {
   pence: number;
-  /** Where the figure came from — shown next to it. */
-  source: 'you' | 'shop page' | 'Pokémon Center' | 'usual price';
-  detail?: string; // e.g. the shop name
-};
-
-/**
- * Typical UK price ranges by product type, shown as a hint when no RRP has
- * been found. Source: packratt.co.uk UK buying guide (2026). Edit freely.
- */
-export const TYPICAL_RANGES: Partial<Record<ProductType, [number, number]>> = {
-  ETB: [4000, 5500],
-  BOOSTER_BUNDLE: [2200, 2800],
-  BOOSTER_BOX: [10000, 14000],
-  BOOSTER_PACK: [400, 500],
-  PREMIUM_COLLECTION: [2500, 4500],
+  /** Where the figure came from — shown under it. */
+  source: 'you' | 'shop page' | 'Pokémon Center' | 'RRP table' | 'usual price';
+  detail?: string; // shop name, or the RRP table row name
 };
 
 function mode(values: number[]): number | undefined {
@@ -36,20 +24,28 @@ type ListingLike = {
   rrpPence: number | null;
 };
 
-function pick(productRrp: number | null | undefined, listings: ListingLike[]): Rrp | undefined {
-  // 1. Set by you
+type Rule = { name: string; keywords: string; rrpPence: number; enabled: boolean };
+
+/**
+ * RRP for a product, best source first:
+ * 1. set by you  2. "RRP £x" printed on a shop's page  3. Pokémon Center UK price (official RRP)
+ * 4. the RRP table on the Settings page (matched on the product name)  5. the most common "was" price across shops
+ */
+function pick(productRrp: number | null | undefined, listings: ListingLike[], tableMatch: Rule | undefined): Rrp | undefined {
   if (productRrp) return { pence: productRrp, source: 'you' };
-  // 2. Printed on a shop's page ("RRP £54.99")
+
   const printed = listings.filter((l) => l.rrpPence);
   const printedMode = mode(printed.map((l) => l.rrpPence!));
   if (printedMode) {
     const from = printed.find((l) => l.rrpPence === printedMode)!;
     return { pence: printedMode, source: 'shop page', detail: getStoreConfig(from.url).name };
   }
-  // 3. Pokémon Center UK sells at the official RRP
+
   const pc = listings.find((l) => l.retailer === 'POKEMON_CENTER' && l.pricePence);
   if (pc) return { pence: pc.pricePence!, source: 'Pokémon Center' };
-  // 4. The most common "was" price across shops (shops usually show RRP as the was price)
+
+  if (tableMatch) return { pence: tableMatch.rrpPence, source: 'RRP table', detail: tableMatch.name };
+
   const was = mode(listings.filter((l) => l.wasPricePence).map((l) => l.wasPricePence!));
   if (was) return { pence: was, source: 'usual price' };
   return undefined;
@@ -60,22 +56,33 @@ function pick(productRrp: number | null | undefined, listings: ListingLike[]): R
  * figure found at one shop (or set by you) applies everywhere it's sold.
  */
 export async function rrpForListings(
-  listings: (ListingLike & { id: string; product: { id: string; rrpPence: number | null } | null })[],
+  listings: (ListingLike & {
+    id: string;
+    title: string | null;
+    product: { id: string; name: string; rrpPence: number | null; language: string } | null;
+  })[],
 ): Promise<Map<string, Rrp>> {
   const productIds = [...new Set(listings.map((l) => l.productId).filter(Boolean))] as string[];
-  const siblings = productIds.length
-    ? await prisma.trackedUrl.findMany({
-        where: { productId: { in: productIds } },
-        select: { productId: true, url: true, retailer: true, pricePence: true, wasPricePence: true, rrpPence: true },
-      })
-    : [];
+  const [siblings, rules, settings] = await Promise.all([
+    productIds.length
+      ? prisma.trackedUrl.findMany({
+          where: { productId: { in: productIds } },
+          select: { productId: true, url: true, retailer: true, pricePence: true, wasPricePence: true, rrpPence: true },
+        })
+      : Promise.resolve([]),
+    getRrpRules(),
+    getSettings(),
+  ]);
   const byProduct = new Map<string, ListingLike[]>();
   for (const s of siblings) byProduct.set(s.productId!, [...(byProduct.get(s.productId!) ?? []), s]);
 
   const out = new Map<string, Rrp>();
   for (const l of listings) {
     const group = l.productId ? (byProduct.get(l.productId) ?? [l]) : [l];
-    const rrp = pick(l.product?.rrpPence, group);
+    const title = l.title ?? l.product?.name ?? '';
+    const japanese = l.product?.language === 'JP' || /japanese|\bjpn?\b/i.test(title);
+    const tableMatch = title && (!japanese || settings.rrpForJapanese) ? matchRrpRule(title, rules) : undefined;
+    const rrp = pick(l.product?.rrpPence, group, tableMatch);
     if (rrp) out.set(l.id, rrp);
   }
   return out;

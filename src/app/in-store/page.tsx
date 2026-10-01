@@ -6,13 +6,13 @@ import { DatedGroups, groupBy, monthHeading } from '@/components/dated-groups';
 import { AddDropForm } from '@/components/add-drop-form';
 import { DeleteButton } from '@/components/delete-button';
 import { FeedSources } from '@/components/feed-sources';
+import { getSettings, matchesAny } from '@/lib/settings';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'In store — Peek' };
 
 /**
- * In-store releases, soonest first:
- * - events (pre-releases, leagues, tournaments) listed by the websites Peek scans
+ * In-store releases only (no game nights or tournaments), soonest first:
  * - news about Pokémon cards in physical shops (supermarkets, toy shops, Happy Meals…)
  * - set release dates from news (sets reach shop shelves on release day)
  * - links you add
@@ -21,7 +21,7 @@ export default async function InStorePage() {
   const today = new Date(new Date().setUTCHours(0, 0, 0, 0));
   const recent = new Date(Date.now() - 30 * 86_400_000);
 
-  const [items, manual] = await Promise.all([
+  const [items, manual, settings] = await Promise.all([
     prisma.dropItem.findMany({
       where: {
         hidden: false,
@@ -39,10 +39,12 @@ export default async function InStorePage() {
       where: { OR: [{ releaseDate: { gte: today } }, { releaseDate: null }] },
       orderBy: { releaseDate: { sort: 'asc', nulls: 'last' } },
     }),
+    getSettings(),
   ]);
+  // Releases only: hide events, game nights, leagues… (word list on the Settings page). Links you added always show.
+  const releases = items.filter((i) => i.source === 'Added by you' || !matchesAny(i.title, settings.inStoreExclude));
 
-  const label = (title: string, kind: string) =>
-    /pre-?release/i.test(title) ? 'Pre-release' : /tournament|league|cup|event/i.test(title) ? 'Event' : kind === 'in-store' ? 'In store' : 'Release';
+  const label = (kind: string) => (kind === 'in-store' ? 'In store' : 'Release');
 
   const tiles: DropTileData[] = [
     ...manual.map((d) => ({
@@ -54,16 +56,16 @@ export default async function InStorePage() {
       releaseDate: d.releaseDate,
       cta: 'Sign up',
     })),
-    ...items.map((i) => ({
+    ...releases.map((i) => ({
       key: i.id,
       href: i.url,
       title: i.title,
       source: i.source,
       imageUrl: i.imageUrl,
-      label: label(i.title, i.kind),
+      label: label(i.kind),
       releaseDate: i.releaseDate,
       publishedAt: i.publishedAt,
-      cta: /event|pre-?release|tournament|league/i.test(i.title) ? 'Book' : 'Details',
+      cta: 'Details',
       deleteBody: { target: 'drop', id: i.id },
     })),
   ].sort((a, b) => (a.releaseDate?.getTime() ?? Infinity) - (b.releaseDate?.getTime() ?? Infinity));
@@ -74,7 +76,7 @@ export default async function InStorePage() {
         <div className="min-w-0">
           <h1 className="text-lg font-bold">In store</h1>
           <p className="text-sm text-zinc-500">
-            Release days, Pokémon cards in high-street shops, and pre-release events — soonest first.
+            Pokémon releases in high-street shops and supermarkets, and new set release days — soonest first.
           </p>
         </div>
         <div className="flex items-center gap-2">

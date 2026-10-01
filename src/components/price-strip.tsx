@@ -98,7 +98,15 @@ export function PriceStrip({
       : diff > 0
         ? 'text-rose-600 dark:text-rose-400'
         : 'text-emerald-600 dark:text-emerald-400';
-  const sourceLabel = rrp ? (rrp.source === 'you' ? 'set by you' : rrp.detail ? `from ${rrp.detail}` : rrp.source) : null;
+  const sourceLabel = rrp
+    ? rrp.source === 'you'
+      ? 'set by you'
+      : rrp.source === 'RRP table'
+        ? 'RRP table'
+        : rrp.detail
+          ? `from ${rrp.detail}`
+          : rrp.source
+    : null;
 
   return (
     <div className="grid grid-cols-3 overflow-hidden rounded-lg bg-zinc-100 text-center dark:bg-zinc-800/70">
@@ -114,7 +122,13 @@ export function PriceStrip({
         onClick={() => productId && setEditing(true)}
         disabled={!productId}
         className="flex flex-col border-x border-white px-1.5 py-1 transition hover:bg-zinc-200 dark:border-zinc-900 dark:hover:bg-zinc-700"
-        title={productId ? 'Tap to set the RRP' : undefined}
+        title={
+          rrp?.source === 'RRP table'
+            ? `From the RRP table (“${rrp.detail}”) — tap to set your own`
+            : productId
+              ? 'Tap to set the RRP'
+              : undefined
+        }
       >
         <span className="text-[10px] uppercase tracking-wide text-zinc-500">RRP {productId && '✎'}</span>
         {rrp ? (

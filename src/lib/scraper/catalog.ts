@@ -17,12 +17,12 @@ import { categorize } from '../categorize';
 import { linkProducts } from '../products';
 import { fetchHtml } from './fetch';
 import { parsePricePence } from './parse';
-import { findAnyDate } from '../dates';
+import { findRrpPence } from './parse';
+import { DEFAULT_SETTINGS, getSettings, isPriorityTitle, matchesAny, splitList, type GeneralSettings } from '../settings';
 
 const MIN = 60_000;
 const PAGE_SIZE = 250;
 const MAX_PAGES = 40;
-const RESCAN_EVERY = 30 * MIN; // Shopify catalogues
 const SITEMAP_RESCAN_EVERY = 24 * 60 * MIN; // sitemaps: new products appear slowly
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -45,8 +45,15 @@ type ShopifyProduct = {
 };
 
 const SINGLE_CARD = /\b\d{1,3}\s?\/\s?\d{1,3}\b|\b(single|graded|psa|cgc|bgs)\b/i;
-const NOT_SEALED =
-  /\b(event|ticket|tournament|league|sleeves|binder|playmat|deck ?box|toploader|portfolio|plush|figure|t-shirt|hoodie|mug|keyring|poster)\b/i;
+// Settings used by the scanner (Settings page). Loaded at the start of each scan.
+let scanSettings: GeneralSettings = DEFAULT_SETTINGS;
+let excludePhrases = splitList(DEFAULT_SETTINGS.excludeFromScans);
+async function loadScanSettings() {
+  scanSettings = await getSettings();
+  excludePhrases = splitList(scanSettings.excludeFromScans);
+}
+const notSealed = (text: string) => matchesAny(text, excludePhrases);
+const rescanEvery = () => scanSettings.rescanShopsMin * MIN;
 
 /**
  * Pokémon TCG sealed product? (packs, boxes, ETBs, tins, collections…) — excludes singles and merch.
@@ -56,43 +63,11 @@ export function isPokemonSealed(p: ShopifyProduct, inPokemonCollection = false):
   const tags = Array.isArray(p.tags) ? p.tags.join(' ') : (p.tags ?? '');
   if (!inPokemonCollection && !/pok[eé]mon/i.test(`${p.title} ${p.product_type} ${p.vendor} ${tags}`)) return false;
   if (SINGLE_CARD.test(`${p.title} ${p.product_type}`)) return false;
-  if (NOT_SEALED.test(`${p.title} ${p.product_type}`)) return false;
+  if (notSealed(`${p.title} ${p.product_type}`)) return false;
   return categorize(p.title).type !== 'OTHER' || /\b(tcg|trading card|card game)\b/i.test(p.title);
 }
 
-const EVENT = /\b(pre-?release|event|tournament|league|league cup|challenge|championships?|launch party|play ?day)\b/i;
-
-/** In-store Pokémon TCG event ticket (pre-release, league, tournament…). */
-export function isPokemonEvent(p: ShopifyProduct): boolean {
-  const tags = Array.isArray(p.tags) ? p.tags.join(' ') : (p.tags ?? '');
-  if (!/pok[eé]mon/i.test(`${p.title} ${p.product_type} ${tags}`)) return false;
-  return EVENT.test(`${p.title} ${p.product_type}`);
-}
-
 const stripHtml = (html?: string) => (html ?? '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-
-/** Save in-store events from a catalogue page to the In Store page. */
-async function saveEvents(shopName: string, host: string, products: ShopifyProduct[]) {
-  const events = products.filter(isPokemonEvent);
-  if (!events.length) return 0;
-  const { count } = await prisma.dropItem.createMany({
-    data: events.map((p) => {
-      const body = stripHtml(p.body_html);
-      return {
-        url: `https://${host}/products/${p.handle}`,
-        title: p.title.slice(0, 300),
-        kind: 'in-store',
-        source: shopName,
-        summary: body.slice(0, 300) || null,
-        imageUrl: p.images?.[0]?.src,
-        releaseDate: findAnyDate(`${p.title} ${body}`),
-        publishedAt: new Date(),
-      };
-    }),
-    skipDuplicates: true,
-  });
-  return count;
-}
 
 type ScannedItem = {
   url: string;
@@ -100,6 +75,7 @@ type ScannedItem = {
   status: StockStatus;
   pricePence?: number;
   wasPricePence?: number;
+  rrpPence?: number;
   imageUrl?: string;
 };
 
@@ -123,6 +99,8 @@ function toItem(host: string, p: ShopifyProduct): ScannedItem {
     pricePence: pick?.price,
     wasPricePence: pick?.was && pick.price && pick.was > pick.price ? pick.was : undefined,
     imageUrl: p.images?.[0]?.src,
+    // Many shops write "RRP £54.99" in the product description
+    rrpPence: findRrpPence(stripHtml(p.body_html)),
   };
 }
 
@@ -166,7 +144,8 @@ async function saveItems(items: ScannedItem[]) {
           title: f.title,
           imageUrl: f.imageUrl,
           productId: product?.id,
-          priority: product?.hot ? 1 : 0,
+          priority: product?.hot || isPriorityTitle(f.title, scanSettings) ? 1 : 0,
+          rrpPence: f.rrpPence,
           status: f.status,
           pricePence: f.pricePence,
           wasPricePence: f.wasPricePence,
@@ -189,7 +168,8 @@ async function saveItems(items: ScannedItem[]) {
     const e = byUrl.get(item.url);
     if (!e) continue;
     const priceChanged = item.pricePence !== undefined && item.pricePence !== e.pricePence;
-    if (item.status === e.status && !priceChanged) {
+    const rrpFound = !!item.rrpPence && item.rrpPence !== e.rrpPence;
+    if (item.status === e.status && !priceChanged && !rrpFound) {
       (e.source === 'CATALOG' ? unchangedCatalog : unchanged).push(e.id);
       continue;
     }
@@ -201,6 +181,7 @@ async function saveItems(items: ScannedItem[]) {
           pricePence: item.pricePence ?? e.pricePence,
           wasPricePence: item.wasPricePence ?? null,
           onSale: !!item.wasPricePence,
+          ...(item.rrpPence ? { rrpPence: item.rrpPence } : {}),
           lastCheckedAt: now,
           failCount: 0,
           lastError: null,
@@ -253,7 +234,6 @@ async function scanShopifyShop(shop: ShopRow, deadline: number) {
         retries: 1,
       });
       const products = (JSON.parse(html) as { products?: ShopifyProduct[] }).products ?? [];
-      await saveEvents(shop.name, shop.host, products);
       const pokemonCollection = !!shop.collection && /pok/i.test(shop.collection);
       const items = products.filter((p) => isPokemonSealed(p, pokemonCollection)).map((p) => toItem(shop.host, p));
       found += items.length;
@@ -279,12 +259,12 @@ async function scanShopifyShop(shop: ShopRow, deadline: number) {
       ? {
           scanPage: 1,
           lastScannedAt: new Date(now),
-          nextScanAt: new Date(now + RESCAN_EVERY),
+          nextScanAt: new Date(now + rescanEvery()),
           lastError: null,
           productsFound: found,
         }
       : error
-        ? { lastError: error.slice(0, 300), nextScanAt: new Date(now + RESCAN_EVERY) }
+        ? { lastError: error.slice(0, 300), nextScanAt: new Date(now + rescanEvery()) }
         : { scanPage: page }, // out of time: carry on from this page next run
   });
   return { host: shop.host, found, added, changed, finished, error };
@@ -314,7 +294,7 @@ export function looksLikePokemonProductUrl(loc: string, host: string): boolean {
   const c = categorize(text);
   if (!/pok[eé]mon/i.test(text) && !c.expansion) return false;
   if (/\b\d{1,3} \d{3}\b/.test(text) || /\b(single|singles|graded|psa|cgc)\b/i.test(text)) return false; // single cards
-  if (NOT_SEALED.test(text)) return false;
+  if (notSealed(text)) return false;
   return c.type !== 'OTHER' || /\b(tcg|trading cards?)\b/i.test(text);
 }
 
@@ -366,7 +346,7 @@ function looksLikePokemonProductText(text: string, u: URL): boolean {
   if (text.length < 8 || text.length > 200 || NON_PRODUCT_PATH.test(u.pathname)) return false;
   const c = categorize(text);
   if (!/pok[eé]mon/i.test(text) && !c.expansion) return false;
-  if (SINGLE_CARD.test(text) || NOT_SEALED.test(text)) return false;
+  if (SINGLE_CARD.test(text) || notSealed(text)) return false;
   return c.type !== 'OTHER';
 }
 
@@ -461,6 +441,7 @@ async function scanSitemapShop(shop: ShopRow, deadline: number) {
 /** Scan every shop that is due, in parallel, within the time budget. */
 export async function runDueScans(budgetMs = 45_000) {
   const deadline = Date.now() + budgetMs;
+  await loadScanSettings();
   await prisma.shop.createMany({ data: SEED_SHOPS, skipDuplicates: true });
   const due = await prisma.shop.findMany({
     where: { enabled: true, nextScanAt: { lte: new Date() } },
@@ -476,6 +457,7 @@ export async function runDueScans(budgetMs = 45_000) {
  * any other site through its sitemap. Returns null if nothing readable.
  */
 export async function addShop(host: string, collection?: string) {
+  await loadScanSettings();
   const existing = await prisma.shop.findUnique({ where: { host } });
   if (existing?.enabled && !existing.collection && existing.platform === 'shopify' && collection) {
     return { shop: existing, platform: 'shopify' as const, alreadyWhole: true };
@@ -509,6 +491,7 @@ export async function addShop(host: string, collection?: string) {
 
 /** Add a category page (non-Shopify) as a source: collect its product links now and re-read it daily. */
 export async function addListingPage(url: string, deadline: number) {
+  await loadScanSettings();
   const urls = await crawlListingPage(url, deadline);
   if (urls.length < 2) return null;
   const host = new URL(url).hostname;

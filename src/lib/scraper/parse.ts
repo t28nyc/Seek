@@ -60,10 +60,15 @@ export function parsePricePence(v: unknown): number | undefined {
   return pence > 0 && pence < 10_000_000 ? pence : undefined;
 }
 
-/** Find an RRP written in page text: "RRP £54.99", "RRP: £54.99", "(RRP £55)". */
+/**
+ * Find an RRP written in text: "RRP £54.99", "RRP: £54.99", "MSRP £55", "SRP £49.99",
+ * "Recommended retail price £54.99", "Retail price: £54.99".
+ */
 export function findRrpPence(text: string | undefined): number | undefined {
   if (!text) return undefined;
-  const m = text.match(/\bR\.?R\.?P\.?\b[^£\d]{0,12}£\s?(\d{1,4}(?:[.,]\d{2})?)/i);
+  const m = text.match(
+    /(?:\bR\.?R\.?P\b|\bM\.?S\.?R\.?P\b|\bS\.?R\.?P\b|\brecommended (?:retail )?price\b|\bretail price\b)\.?[^£\d]{0,15}£\s?(\d{1,4}(?:[.,]\d{2})?)/i,
+  );
   return m ? parsePricePence(m[1].replace(',', '.')) : undefined;
 }
 

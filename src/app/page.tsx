@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { StockStatus } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { storeNameFromHost } from '@/lib/retailers';
-import { rrpForListings, TYPICAL_RANGES } from '@/lib/rrp';
+import { rrpForListings } from '@/lib/rrp';
 import { timeAgo } from '@/lib/format';
 import {
   baseWhere,
@@ -206,7 +206,6 @@ export default async function OnlinePage({ searchParams }: { searchParams: Promi
                 key={l.id}
                 listing={l}
                 rrp={rrps.get(l.id) ?? null}
-                typical={l.product && l.product.language === 'EN' ? (TYPICAL_RANGES[l.product.type] ?? null) : null}
               />
             ))}
           </ul>
